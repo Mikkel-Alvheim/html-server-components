@@ -1,4 +1,3 @@
-
 package main
 import "core:os"
 import "core:unicode/utf8"
@@ -143,7 +142,6 @@ DIGIT := CHARACTER[0:10]
 UPPER_ALPHA := CHARACTER[10:36]
 LOWER_ALPHA :=  CHARACTER[36:62]
 VALID_EL_CHAR := CHARACTER[36:66]
-
 VALID_EL_SYMBOL := CHARACTER[62:66]
 
 print_token_sets :: proc() {
@@ -159,112 +157,50 @@ Parser :: struct {
 	pos: int,
 }
 
-at_end :: proc(parser: ^Parser) -> bool {
-	return parser.pos >= utf8.rune_count(parser.source)
+Attribute :: struct {
+	name: string,
+	value: string
 }
+Element :: struct {
+	name: string,
+	attributes: [dynamic]Attribute,
+	content: [dynamic]Node
+}
+Text :: struct {
+	source: string
+}
+Placeholder :: struct {
+	expression: string
+}
+Node :: union #no_nil {Element, Text, Placeholder}
 
-peek_next :: proc(parser: ^Parser) -> (char: string, ok: bool) {
-	return strings.substring(parser.source, parser.pos, parser.pos + 1)
-}
-peek_ahead :: proc(parser: ^Parser, offset: int) -> (char: string, ok: bool) {
-	return strings.substring(parser.source, parser.pos + offset, parser.pos + offset + 1)
-}
-peek :: proc{peek_next, peek_ahead}
+main :: proc() {
+	for arg, i in os.args {
+		fmt.printf("%d: %s\n", i, arg)
+	}
 
-read_next :: proc(parser: ^Parser) -> (string, bool) {
-	char, ok := peek(parser)
-	if ok {
-		parser.pos += 1
-	}
-	return char, ok
-}
+	print_token_sets()
+	input_dir := os.args[1]
+	output_dir := os.args[2]
 
-read_until :: proc(parser: ^Parser, delimiter: rune) -> string {
-	delim_string, err := utf8.runes_to_string({delimiter})
-	defer delete(delim_string)
-	start := parser.pos
-	char, ok := "", true
-	for char != delim_string {
-		char, ok = read_next(parser)
-		if !ok {
-			panic(fmt.tprintfln("Missing %v in:\n%s", delimiter, strings.substring_from(parser.source, start)))
-		}
-	}
-	parser.pos -= 1
-	reading, in_bounds := strings.substring(parser.source, start, parser.pos)
-	if !in_bounds {
-		panic("Invalid source range")
-	}
-	return reading
-}
-
-read_string :: proc(parser: ^Parser, value: string) -> (string, bool) {
-	length := utf8.rune_count(value)
-	reading, in_bounds := strings.substring(
-		parser.source, parser.pos, parser.pos + length
-	)
-	if !in_bounds || reading != value {
-		return "", false
-	}
-	parser.pos += length
-	return reading, true
-}
-read_rune :: proc(parser: ^Parser, value: rune) -> (string, bool) {
-	char, err := utf8.runes_to_string({value})
-	defer delete(char)
-	return read_string(parser, char)
-}
-read :: proc{read_next, read_string, read_rune}
-
-read_any :: proc(parser: ^Parser, values: []string) -> (sub: string, consumed: bool) {
-	for value in values {
-		consumed_string, ok := read(parser, value)
-		if ok {
-			return consumed_string, true
-		}
-	}
-	return "", false
-}
-read_all :: proc(parser: ^Parser, values: []string) -> (sub: string, ok: bool) {
-	start := parser.pos
-	for {
-		_, ok := read_any(parser, values)
-		// TODO: Introduce hard limit on iteration
-		if !ok {
-			return strings.substring(parser.source, start, parser.pos)
+	files, err := os.read_all_directory_by_path(input_dir, context.temp_allocator)
+	if err == nil {
+		for file, i in files {
+			fmt.printf("%d: %s\n", i, file.name)
+			if os.ext(file.fullpath) != ".html" {
+				fmt.printf("%s does not have .html extension\n", file.name)
+				continue
+			}
+			data, err := os.read_entire_file_from_path(file.fullpath, context.temp_allocator)
+			if err != nil {
+				fmt.printf("Could not read file...\n")
+			}
+			content := strings.clone_from_bytes(data)
+			parse_document(&{source = content, pos = 0})
 		}
 	}
 }
 
-starts_with :: proc(parser: ^Parser, prefix: string) -> bool {
-	slice, ok := strings.substring_from(parser.source, parser.pos)
-	if !ok {
-		return false
-	}
-	return strings.has_prefix(slice, prefix)
-}
-
-expect_string :: proc(parser: ^Parser, value: string) {
-	_, ok := read(parser, value)
-	if !ok {
-		panic(fmt.tprintfln("Parsing failed. Did not get expected %s", value))
-	}
-}
-
-expect_rune :: proc(parser: ^Parser, value: rune) {
-	char, err := utf8.runes_to_string({value})
-	defer delete(char)
-	expect_string(parser, char)
-}
-
-expect :: proc{expect_string, expect_rune, expect_any}
-
-expect_any :: proc(parser: ^Parser, values: []string) {
-	_, ok := read_any(parser, values)
-	if !ok {
-		panic(fmt.tprintfln("Parsing failed. Did not get expected %v", values))
-	}
-}
 parse_document :: proc(parser: ^Parser) {
 	document: Element = {
 		name = "document"
@@ -401,46 +337,106 @@ parse_text :: proc(parser: ^Parser) -> Text {
 	return {source}
 }
 
-Attribute :: struct {
-	name: string,
-	value: string
+at_end :: proc(parser: ^Parser) -> bool {
+	return parser.pos >= utf8.rune_count(parser.source)
 }
-Element :: struct {
-	name: string,
-	attributes: [dynamic]Attribute,
-	content: [dynamic]Node
-}
-Text :: struct {
-	source: string
-}
-Placeholder :: struct {
-	expression: string
-}
-Node :: union #no_nil {Element, Text, Placeholder}
 
-main :: proc() {
-	for arg, i in os.args {
-		fmt.printf("%d: %s\n", i, arg)
+peek_next :: proc(parser: ^Parser) -> (char: string, ok: bool) {
+	return strings.substring(parser.source, parser.pos, parser.pos + 1)
+}
+peek_ahead :: proc(parser: ^Parser, offset: int) -> (char: string, ok: bool) {
+	return strings.substring(parser.source, parser.pos + offset, parser.pos + offset + 1)
+}
+peek :: proc{peek_next, peek_ahead}
+
+read_next :: proc(parser: ^Parser) -> (string, bool) {
+	char, ok := peek(parser)
+	if ok {
+		parser.pos += 1
 	}
+	return char, ok
+}
+read_string :: proc(parser: ^Parser, value: string) -> (string, bool) {
+	length := utf8.rune_count(value)
+	reading, in_bounds := strings.substring(
+		parser.source, parser.pos, parser.pos + length
+	)
+	if !in_bounds || reading != value {
+		return "", false
+	}
+	parser.pos += length
+	return reading, true
+}
+read_rune :: proc(parser: ^Parser, value: rune) -> (string, bool) {
+	char, err := utf8.runes_to_string({value})
+	defer delete(char)
+	return read_string(parser, char)
+}
+read :: proc{read_next, read_string, read_rune}
 
-	print_token_sets()
-	input_dir := os.args[1]
-	output_dir := os.args[2]
-
-	files, err := os.read_all_directory_by_path(input_dir, context.temp_allocator)
-	if err == nil {
-		for file, i in files {
-			fmt.printf("%d: %s\n", i, file.name)
-			if os.ext(file.fullpath) != ".html" {
-				fmt.printf("%s does not have .html extension\n", file.name)
-				continue
-			}
-			data, err := os.read_entire_file_from_path(file.fullpath, context.temp_allocator)
-			if err != nil {
-				fmt.printf("Could not read file...\n")
-			}
-			content := strings.clone_from_bytes(data)
-			parse_document(&{source = content, pos = 0})
+read_until :: proc(parser: ^Parser, delimiter: rune) -> string {
+	delim_string, err := utf8.runes_to_string({delimiter})
+	defer delete(delim_string)
+	start := parser.pos
+	char, ok := "", true
+	for char != delim_string {
+		char, ok = read_next(parser)
+		if !ok {
+			panic(fmt.tprintfln("Missing %v in:\n%s", delimiter, strings.substring_from(parser.source, start)))
 		}
+	}
+	parser.pos -= 1
+	reading, in_bounds := strings.substring(parser.source, start, parser.pos)
+	if !in_bounds {
+		panic("Invalid source range")
+	}
+	return reading
+}
+
+read_any :: proc(parser: ^Parser, values: []string) -> (sub: string, consumed: bool) {
+	for value in values {
+		consumed_string, ok := read(parser, value)
+		if ok {
+			return consumed_string, true
+		}
+	}
+	return "", false
+}
+read_all :: proc(parser: ^Parser, values: []string) -> (sub: string, ok: bool) {
+	start := parser.pos
+	for {
+		_, ok := read_any(parser, values)
+		// TODO: Introduce hard limit on iteration
+		if !ok {
+			return strings.substring(parser.source, start, parser.pos)
+		}
+	}
+}
+
+starts_with :: proc(parser: ^Parser, prefix: string) -> bool {
+	slice, ok := strings.substring_from(parser.source, parser.pos)
+	if !ok {
+		return false
+	}
+	return strings.has_prefix(slice, prefix)
+}
+
+expect_string :: proc(parser: ^Parser, value: string) {
+	_, ok := read(parser, value)
+	if !ok {
+		panic(fmt.tprintfln("Parsing failed. Did not get expected %s", value))
+	}
+}
+expect_rune :: proc(parser: ^Parser, value: rune) {
+	char, err := utf8.runes_to_string({value})
+	defer delete(char)
+	expect_string(parser, char)
+}
+expect :: proc{expect_string, expect_rune, expect_any}
+
+expect_any :: proc(parser: ^Parser, values: []string) {
+	_, ok := read_any(parser, values)
+	if !ok {
+		panic(fmt.tprintfln("Parsing failed. Did not get expected %v", values))
 	}
 }
