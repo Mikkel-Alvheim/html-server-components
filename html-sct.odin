@@ -1,5 +1,9 @@
 package main
 import "core:os"
+import "core:unicode/utf8/utf8string"
+import "core:unicode"
+import "core:terminal/ansi"
+import "core:math"
 import "core:unicode/utf8"
 import "core:fmt"
 import "core:strings"
@@ -144,6 +148,28 @@ LOWER_ALPHA :=  CHARACTER[36:62]
 VALID_EL_CHAR := CHARACTER[36:66]
 VALID_EL_SYMBOL := CHARACTER[62:66]
 
+is_digit_ASCII :: proc(c: rune) -> bool {
+	return c >= '0' && c <='9'
+}
+is_upper_ASCII :: proc(c: rune) -> bool {
+	return c >= 'A' && c <= 'Z'
+}
+is_lower_ASCII :: proc(c: rune) -> bool {
+	return c >= 'a' && c <= 'z'
+}
+is_alpha_ASCII :: proc(c: rune) -> bool {
+	return is_upper_ASCII(c) || is_lower_ASCII(c)
+}
+is_alpha_numeric_ASCII :: proc(c: rune) -> bool {
+	return is_alpha_ASCII(c) || is_digit_ASCII(c)
+}
+is_name_symbol_HTML :: proc(c: rune) -> bool {
+	return c == '-' || c == '_' || c == ':' || c == '.'
+}
+is_name_char_HTML :: proc(c: rune) -> bool {
+	return is_lower_ASCII(c) || is_digit_ASCII(c) || is_name_symbol_HTML(c)
+}
+
 print_token_sets :: proc() {
 	fmt.printfln("Digits: %v", DIGIT)
 	fmt.printfln("Uppercase: %v", UPPER_ALPHA)
@@ -153,7 +179,7 @@ print_token_sets :: proc() {
 }
 
 Parser :: struct {
-	source: string,
+	source: ^utf8string.String,
 	pos: int,
 }
 
@@ -196,7 +222,8 @@ main :: proc() {
 				fmt.printf("Could not read file...\n")
 			}
 			content := strings.clone_from_bytes(data)
-			parse_document(&{source = content, pos = 0})
+			utf8_string: utf8string.String
+			parse_document(&{source = utf8string.init(&utf8_string, content), pos = 0})
 		}
 	}
 }
@@ -210,42 +237,92 @@ parse_document :: proc(parser: ^Parser) {
 		if at_end(parser) {
 			break
 		}
-		element: Element
-		parse_element(parser, &element)
-		append(&document.content, element)
+		parse_children(parser, &document)
+		fmt.printfln("Left parse_children in parse_document. current pos: %d", parser.pos)
 	}
 	fmt.printf("%v", document)
 }
 
 parse_element :: proc(parser: ^Parser, element: ^Element) {
 	parse_open_tag(parser, element)
+	fmt.printfln("Left parse_open_tag. current pos: %d", parser.pos)
 	parse_children(parser, element)
+	fmt.printfln("Left parse_children. current pos: %d", parser.pos)
 }
 
 parse_children :: proc(parser: ^Parser, parent: ^Element) {
 	placeholder_delim_char := utf8.runes_to_string({PLACEHOLDER_DELIM})
 	defer delete(placeholder_delim_char)
+
+	iteration := 0
+	fmt.printfln("Starting loop in comment section of parse_non_html_tag.")
 	for {
-		next_token, ok := peek(parser)
-		switch next_token {
+		if at_end(parser) {
+			break
+		}
+		char, ok := peek(parser)
+		fmt.printfln("iteration: %d, pos: %s (%d)\n%v",
+			iteration, char, parser.pos, parent
+		)
+		switch char {
 		case START_TAG_OPEN:
 			next_token, ok := peek(parser, 1)
 			if next_token == "/" {
 				parse_close_tag(parser, parent)
+				fmt.printfln("Left parse_close_tag. current pos: %d", parser.pos)
 				return
 			}
-			child: Element
-			parse_element(parser, &child)
-			append(&parent.content, child)
+			else if next_token == "!" {
+				append(&parent.content, parse_non_html_tag(parser))
+				fmt.printfln("Left parse_non_html_tag. current pos: %d", parser.pos)
+			}
+			else {
+				child: Element
+				parse_element(parser, &child)
+				append(&parent.content, child)
+				fmt.printfln("Left parse_element. current pos: %d", parser.pos)
+			}
 		case placeholder_delim_char:
 			append(&parent.content, parse_placeholder(parser))
+			fmt.printfln("Left parse_placeholder. current pos: %d", parser.pos)
 		case:
 			append(&parent.content, parse_text(parser))
+			fmt.printfln("Left parse_text. current pos: %d", parser.pos)
 		}
+		iteration += 1
+	}
+}
+
+parse_non_html_tag :: proc(parser: ^Parser) -> Text {
+	fmt.printfln("Entered parse_non_html_tag. current pos: %d", parser.pos)
+	tag_close_char := utf8.runes_to_string({TAG_CLOSE})
+	defer delete(tag_close_char)
+
+	start := parser.pos
+	_, comment_opened := read(parser, "<!--")
+	if comment_opened {
+		fmt.printfln("Starting loop in comment section of parse_non_html_tag.")
+		for comment_closed := false; !comment_closed; {
+			read_until(parser, '-')
+			_, comment_closed = read(parser, "-->")
+			if !comment_closed {
+				parser.pos += 1
+			}
+		}
+		source, in_bounds := strings.substring(parser.source, start, parser.pos)
+		if !in_bounds {
+			panic("parse_non_html_tag comment section tried to return invalid source range!")
+		}
+		return {source}
+	}
+
+	return {
+		source = fmt.tprintf("<!%s>", read_until(parser, TAG_CLOSE, inclusive = true))
 	}
 }
 
 parse_open_tag :: proc(parser: ^Parser, element: ^Element) {
+	fmt.printfln("Entered parse_open_tag. current pos: %d", parser.pos)
 	expect(parser, START_TAG_OPEN)
 	name := parse_tag_name(parser)
 	element.name = name
@@ -262,6 +339,7 @@ parse_open_tag :: proc(parser: ^Parser, element: ^Element) {
 }
 
 parse_close_tag :: proc(parser: ^Parser, element: ^Element) {
+	fmt.printfln("Entered parse_close_tag. current pos: %d", parser.pos)
 	expect(parser, END_TAG_OPEN)
 	name := read_until(parser, TAG_CLOSE)
 	if name != element.name {
@@ -270,6 +348,7 @@ parse_close_tag :: proc(parser: ^Parser, element: ^Element) {
 }
 
 parse_tag_name :: proc(parser: ^Parser) -> (string) {
+	fmt.printfln("Entered parse_tag_name. current pos: %d", parser.pos)
 	start_pos: = parser.pos
 	expect(parser, LOWER_ALPHA)
 	read_all(parser, VALID_EL_CHAR)
@@ -281,6 +360,7 @@ parse_tag_name :: proc(parser: ^Parser) -> (string) {
 }
 
 parse_attribute :: proc(parser: ^Parser) -> Attribute {
+	fmt.printfln("Entered parse_attribute. current pos: %d", parser.pos)
 	name := parse_tag_name(parser)
 	value := ""
 	next_token, in_bounds := peek(parser)
@@ -288,11 +368,13 @@ parse_attribute :: proc(parser: ^Parser) -> Attribute {
 		expect(parser, ATTR_INFIX)
 		expect(parser, ATTR_VALUE_DELIM)
 		value = read_until(parser, ATTR_VALUE_DELIM)
+		expect(parser, ATTR_VALUE_DELIM)
 	}
 	return {name, value}
 }
 
 parse_placeholder :: proc(parser: ^Parser) -> Placeholder {
+	fmt.printfln("Entered parse_placeholder. current pos: %d", parser.pos)
 	bracket_open_char := utf8.runes_to_string({BRACKET_OPEN})
 	bracket_close_char:= utf8.runes_to_string({BRACKET_CLOSE})
 	defer delete(bracket_open_char)
@@ -302,6 +384,7 @@ parse_placeholder :: proc(parser: ^Parser) -> Placeholder {
 	expect(parser, BRACKET_OPEN)
 	start := parser.pos
 	nesting :u8 = 0
+	fmt.printfln("Starting loop in parse_placeholder.")
 	for token, in_bounds := read_next(parser); token != "}" || nesting != 0; {
 		if !in_bounds {
 			panic("Missing closing bracket for placeholder.")
@@ -313,7 +396,7 @@ parse_placeholder :: proc(parser: ^Parser) -> Placeholder {
 		else if token == bracket_close_char {
 			nesting -= 1
 		}
-		token, in_bounds := read_next(parser)
+		token, in_bounds = read_next(parser)
 	}
 	expression, in_bounds := strings.substring(parser.source, start, parser.pos)
 	if !in_bounds {
@@ -323,11 +406,17 @@ parse_placeholder :: proc(parser: ^Parser) -> Placeholder {
 }
 
 parse_text :: proc(parser: ^Parser) -> Text {
+	fmt.printfln("Entered parse_text. current pos: %d", parser.pos)
 	ph_delim_char := utf8.runes_to_string({PLACEHOLDER_DELIM})
 	defer delete(ph_delim_char)
 
 	start := parser.pos
-	for token, ok := peek(parser); token != START_TAG_OPEN || token != ph_delim_char; {
+	fmt.printfln("Starting loop in parse_text.")
+	for char, ok := peek(parser); char != START_TAG_OPEN && char != ph_delim_char; char, ok = peek(parser) {
+		fmt.printfln("char: %s", char)
+		if at_end(parser) {
+			break
+		}
 		read(parser)
 	}
 	source, in_bounds := strings.substring(parser.source, start, parser.pos)
@@ -337,21 +426,22 @@ parse_text :: proc(parser: ^Parser) -> Text {
 	return {source}
 }
 
-at_end :: proc(parser: ^Parser) -> bool {
-	return parser.pos >= utf8.rune_count(parser.source)
+at_end :: proc(parser: ^Parser, offset := 0) -> bool {
+	return parser.pos + offset >= parser.source.rune_count
 }
 
-peek_next :: proc(parser: ^Parser) -> (char: string, ok: bool) {
-	return strings.substring(parser.source, parser.pos, parser.pos + 1)
+peek :: proc(p: ^Parser, offset := 0) -> rune {
+	return at_end(p, offset) ? utf8.RUNE_EOF : utf8string.at(p.source, p.pos + offset)
 }
-peek_ahead :: proc(parser: ^Parser, offset: int) -> (char: string, ok: bool) {
-	return strings.substring(parser.source, parser.pos + offset, parser.pos + offset + 1)
-}
-peek :: proc{peek_next, peek_ahead}
 
-read_next :: proc(parser: ^Parser) -> (string, bool) {
-	char, ok := peek(parser)
-	if ok {
+read_next :: proc(parser: ^Parser) -> rune {
+	if at_end(parser) {
+		return utf8.RUNE_EOF
+	}
+	pos += 1
+	return utf8string.at(p.source, p.pos)
+	char := peek(parser)
+	if char != utf8.RUNE_EOF {
 		parser.pos += 1
 	}
 	return char, ok
@@ -374,18 +464,21 @@ read_rune :: proc(parser: ^Parser, value: rune) -> (string, bool) {
 }
 read :: proc{read_next, read_string, read_rune}
 
-read_until :: proc(parser: ^Parser, delimiter: rune) -> string {
+read_until :: proc(parser: ^Parser, delimiter: rune, inclusive := false) -> string {
 	delim_string, err := utf8.runes_to_string({delimiter})
 	defer delete(delim_string)
 	start := parser.pos
 	char, ok := "", true
+	fmt.printfln("Starting loop in read_until.")
 	for char != delim_string {
 		char, ok = read_next(parser)
 		if !ok {
 			panic(fmt.tprintfln("Missing %v in:\n%s", delimiter, strings.substring_from(parser.source, start)))
 		}
 	}
-	parser.pos -= 1
+	if !inclusive {
+		parser.pos -= 1
+	}
 	reading, in_bounds := strings.substring(parser.source, start, parser.pos)
 	if !in_bounds {
 		panic("Invalid source range")
@@ -394,6 +487,7 @@ read_until :: proc(parser: ^Parser, delimiter: rune) -> string {
 }
 
 read_any :: proc(parser: ^Parser, values: []string) -> (sub: string, consumed: bool) {
+	fmt.printfln("Starting loop in read_any.")
 	for value in values {
 		consumed_string, ok := read(parser, value)
 		if ok {
@@ -404,6 +498,7 @@ read_any :: proc(parser: ^Parser, values: []string) -> (sub: string, consumed: b
 }
 read_all :: proc(parser: ^Parser, values: []string) -> (sub: string, ok: bool) {
 	start := parser.pos
+	fmt.printfln("Starting loop in read_all.")
 	for {
 		_, ok := read_any(parser, values)
 		// TODO: Introduce hard limit on iteration
@@ -437,6 +532,63 @@ expect :: proc{expect_string, expect_rune, expect_any}
 expect_any :: proc(parser: ^Parser, values: []string) {
 	_, ok := read_any(parser, values)
 	if !ok {
-		panic(fmt.tprintfln("Parsing failed. Did not get expected %v", values))
+		panic(fmt.tprintfln("Parsing failed. Did not get expected %v:\n%s", values, mark_source(parser)))
 	}
+}
+
+mark_source :: proc(parser: ^Parser, length := 1) -> string {
+	ANSI_BOLD :: ansi.CSI + ansi.BOLD + ansi.SGR
+	ANSI_RED:: ansi.CSI + ansi.FG_RED + ansi.SGR
+	ANSI_RESET :: ansi.CSI + ansi.RESET + ansi.SGR
+	COLUMNS :: 80
+	MARKING_SYMBOLS :: 2
+	padding := (COLUMNS - MARKING_SYMBOLS - length) / 2
+	start := math.max(0, parser.pos - padding)
+	end := math.min(parser.rune_count, parser.pos + padding)
+
+	prefix, postfix: string
+	if start >= 3 {
+		start += 3
+		prefix = "..."
+	}
+	if end <= parser.rune_count - 3 {
+		end -= 3
+		postfix = "..."
+	}
+
+	pre_slice, pre_ok := strings.substring(parser.source, start, parser.pos)
+	current_slice, curr_ok := strings.substring(parser.source, parser.pos, parser.pos + 1)
+	post_slice, post_ok := strings.substring(parser.source, parser.pos + 1, end)
+	if !pre_ok || !curr_ok || !post_ok {
+		panic("mark_source tried to mark invalid range!")
+	}
+	return fmt.tprintf("%s%s%s%s[%s]%s%s%s%s%s",
+		prefix, ANSI_RED, pre_slice,
+		ANSI_BOLD, current_slice, ANSI_RESET,
+		ANSI_RED, post_slice, ANSI_RESET, postfix,
+	)
+}
+
+mark_unclosed_tag :: proc(parser: ^Parser, tag_start: int) -> string {
+	ANSI_RED:: ansi.CSI + ansi.FG_RED + ansi.SGR
+	ANSI_RESET:: ansi.CSI + ansi.RESET + ansi.SGR
+	COLUMNS :: 80
+	SPLICE_INFIX :: " ... "
+
+	if tag_start - parser.pos <= 80 {
+		slice, ok := strings.substring(parser.source, tag_start, parser.pos)
+		if !ok {
+			panic("mark_unclosed_tag tried to mark invalid range!")
+		}
+		return slice
+	}
+	length := (COLUMNS / 2) - utf8.rune_count(SPLICE_INFIX)
+	start_slice, start_ok := strings.substring(parser.source, tag_start, tag_start + length)
+	end_slice, end_ok := strings.substring(parser.source, parser.pos - length, parser.pos)
+	if !start_ok || !end_ok {
+		panic("mark_unclosed_tag tried to mark invalid ranges!")
+	}
+	return fmt.tprintf("%s%s%s%s%s",
+		ANSI_RED, start_slice, SPLICE_INFIX, end_slice, ANSI_RESET
+	)
 }
