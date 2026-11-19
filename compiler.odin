@@ -1,5 +1,7 @@
 package main
 
+import "core:fmt"
+import "core:slice"
 // 3.1 Collect all top level templates in ASTs.
 // 3.1.1 Scan the top level of ASTs for Elements with name = template.
 // 3.1.2 Validate: Attribute id must exist.
@@ -70,14 +72,8 @@ collect_templates :: proc(
 		if element.name != "template" {
 			continue
 		}
-		id: string
-		for attribute in element.attributes {
-			if attribute.name == "id" {
-				id = attribute.value
-				break
-			}
-		}
-		if is_valid_custom_element_name(id) {
+		id, found := try_get_attribute_value(element.attributes[:], "id")
+		if found && is_valid_custom_element_name(id) {
 			append(&templates, {id, element})
 		}
 	}
@@ -115,6 +111,53 @@ collect_slots :: proc(
 	t: Template_Declaration, allocator := context.allocator
 ) -> (slots: [dynamic]string) {
 	slots.allocator = allocator
-	// Logic goes where
+	append_slots(&slots, &t.element.content)
 	return slots
+}
+
+append_slots :: proc(slots: ^[dynamic]string, content: ^[dynamic]Node) {
+	for i in 0..<len(content) {
+		element, ok := &content[i].(Element)
+		if !ok {
+			continue
+		}
+		if element.name == "slot" {
+			slot_name, found := try_get_attribute_value(element.attributes[:], "name")
+			if !found {
+				slot_name = get_available_default_slot_name(slots[:])
+			}
+			append(slots, slot_name)
+		}
+		else {
+			append_slots(slots, &element.content)
+		}
+	}
+}
+
+try_get_attribute_value :: proc(attributes: []Attribute, name: string) -> (string, bool) {
+	for attribute in attributes {
+		if attribute.name == name {
+			return attribute.value, true
+		}
+	}
+	return "", false
+}
+
+get_available_default_slot_name :: proc(slots: []string) -> string {
+	i: u8 = 0
+	for i < 255 {
+		name := fmt.tprintf("default-%d", i)
+		available := true
+		for s in slots {
+			if s == name {
+				available = false
+				break
+			}
+		}
+		if available {
+			return name
+		}
+		i += 1
+	}
+	panic("Tried to assign more than 255 unnamed slots to component.")
 }
