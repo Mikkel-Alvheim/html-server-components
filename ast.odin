@@ -10,8 +10,15 @@ Element_Type :: enum {
 	Normal, Void, Foreign
 }
 Attribute :: struct {
-	name: string, value: string
+	name: string,
+	name_slices: [dynamic]AttributeSlice,
+	value: string,
+	value_slices: [dynamic]AttributeSlice
 }
+AttributeSlice :: union #no_nil {
+	Text, Placeholder
+}
+
 Text :: struct {
 	source: string
 }

@@ -1,7 +1,6 @@
 package main
 
 import "core:fmt"
-import "core:slice"
 // 3.1 Collect all top level templates in ASTs.
 // 3.1.1 Scan the top level of ASTs for Elements with name = template.
 // 3.1.2 Validate: Attribute id must exist.

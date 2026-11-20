@@ -313,7 +313,7 @@ parse_non_html_tag :: proc(p: ^Parser) -> Text {
 parse_start_tag :: proc(p: ^Parser, el: ^Element) {
 	fmt.printfln("Entered parse_open_tag. current pos: %d", p.pos)
 	expect(p, START_TAG_OPEN)
-	el.name = parse_name_HTML(p)
+	el.name = parse_el_name(p)
 	el.type = is_in(VOID_EL_NAMES, el.name) ? .Void : .Normal
 	for {
 		space := read_while(p, is_whitespace_ASCII)
@@ -350,7 +350,7 @@ parse_start_tag :: proc(p: ^Parser, el: ^Element) {
 parse_end_tag :: proc(p: ^Parser, el: ^Element) {
 	fmt.printfln("Entered parse_close_tag. current pos: %d", p.pos)
 	expect(p, END_TAG_OPEN)
-	name := parse_name_HTML(p)
+	name := parse_el_name(p)
 	if name != el.name {
 		panic(fmt.tprintfln("Closing tag %v tried to close element %v", name, el.name))
 	}
@@ -358,37 +358,98 @@ parse_end_tag :: proc(p: ^Parser, el: ^Element) {
 	expect(p, TAG_CLOSE)
 }
 
-parse_name_HTML :: proc(p: ^Parser) -> string {
+parse_el_name :: proc(p: ^Parser) -> string {
 	fmt.printfln("Entered parse_name_html. current pos: %d", p.pos)
-	start_pos: = p.pos
+	start_pos := p.pos
 	expect(p, is_lower_ASCII, "lowercase")
-	read_while(p, is_name_char_HTML)
+	read_while(p, is_el_name_char)
 	return utf8string.slice(p.source, start_pos, p.pos)
+}
+
+parse_attribute_name :: proc(p: ^Parser, a: ^Attribute) {
+	fmt.printfln("Entered parse_attribute_name. current pos: %d", p.pos)
+	start := p.pos
+	prev_end := p.pos
+	for {
+		read_while(p, is_attr_name_char)
+		if peek(p) == PLACEHOLDER_DELIM {
+			if p.pos != prev_end {
+				slice: Text = {source = utf8string.slice(
+					p.source, prev_end, p.pos
+				)}
+				append(&a.name_slices, slice)
+			}
+			append(&a.name_slices, parse_placeholder(p))
+			prev_end = p.pos
+		}
+		else {
+			break
+		}
+	}
+	if start == p.pos {
+		panic("Parse_attribute_name got 0 valid characters.")
+	}
+	else if p.pos != prev_end {
+		slice: Text = {source = utf8string.slice(
+			p.source, prev_end, p.pos
+		)}
+		append(&a.name_slices, slice)
+	}
+	a.name = utf8string.slice(p.source, start, p.pos)
 }
 
 // TODO: does not capture placeholders atm.
 parse_attribute :: proc(p: ^Parser) -> Attribute {
 	fmt.printfln("Entered parse_attribute. current pos: %d", p.pos)
-	name := parse_name_HTML(p)
+	attribute: Attribute
+	parse_attribute_name(p, &attribute)
 	read_while(p, is_whitespace_ASCII)
-	value: string
 	char := peek(p)
 	if peek(p) == ATTR_INFIX {
 		expect(p, ATTR_INFIX)
 		read_while(p, is_whitespace_ASCII)
 		if is_attr_value_delim(peek(p)) {
+			start := p.pos
+			previous_end := p.pos
 			delim_char := read(p)
-		 	value = read_until(p, delim_char)
+			next := peek(p)
+			following := peek(p, 1)
+			for {
+				if is_placeholder_delim(next, following) {
+					if p.pos != previous_end {
+						slice: Text = {source = utf8string.slice(
+							p.source, previous_end, p.pos
+						)}
+						append(&attribute.value_slices, slice)
+					}
+					append(&attribute.value_slices, parse_placeholder(p))
+					previous_end = p.pos
+				}
+				else if next == delim_char {
+					break
+				}
+				next = following
+				following = peek(p, 1)
+			}
+		 	if p.pos != previous_end {
+				slice: Text = {source = utf8string.slice(
+					p.source, previous_end, p.pos
+				)}
+				append(&attribute.value_slices, slice)
+			}
+			attribute.value = utf8string.slice(p.source, start, p.pos)
 			expect(p, delim_char)
 		}
 		else {
-			value = read_until(p, is_unquoted_attr_value_delim,
+			attribute.value = read_until(p, is_unquoted_attr_value_delim,
 				"unquoted attribute value delimiter"
 			)
+			slice: Text = {source = attribute.value}
+			append(&attribute.value_slices, slice)
 			p.pos += 1
 		}
 	}
-	return {name, value}
+	return attribute
 }
 
 parse_placeholder :: proc(p: ^Parser) -> Placeholder {
@@ -480,7 +541,7 @@ read_until_rune :: proc(p: ^Parser, delimiter: rune, inclusive := false) -> stri
 }
 read_until_predicate :: proc(
 	p: ^Parser, predicate: proc(rune) -> bool, name: string, inclusive := false
-) -> string{
+) -> string {
 	start := p.pos
 	fmt.printfln("Starting loop in read_until_predicate.")
 	for char := peek(p); !predicate(char); char = peek(p) {
