@@ -18,8 +18,8 @@ is_noncharacter :: proc(c: rune) -> bool {
 	c == '\U000ffffe' || c == '\U000fffff' || c == '\U0010fffe' || c == '\U0010ffff'
 }
 is_attr_name_char :: proc(c: rune) -> bool {
-	return !is_control(c) && !is_noncharacter(c) && !is_attr_value_delim(c) &&
-	!is_el_close_delim(c) && c != ' ' && c != PLACEHOLDER_DELIM
+	return !is_control(c) && !is_noncharacter(c) && !is_quoted(c) &&
+	!is_el_close_delim(c) && c != ' ' && c != PLACEHOLDER_DELIM && c != ATTR_INFIX
 }
 is_whitespace_ASCII :: proc(c: rune) -> bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'
@@ -48,11 +48,11 @@ is_name_symbol_HTML :: proc(c: rune) -> bool {
 is_el_name_char :: proc(c: rune) -> bool {
 	return is_lower_ASCII(c) || is_digit_ASCII(c) || is_name_symbol_HTML(c)
 }
-is_attr_value_delim :: proc(c: rune) -> bool {
+is_quoted :: proc(c: rune) -> bool {
 	return c == '"' || c == '\''
 }
 is_unquoted_attr_value_delim :: proc(c: rune) -> bool {
-	return is_whitespace_ASCII(c) || is_attr_value_delim(c) ||
+	return is_whitespace_ASCII(c) || is_quoted(c) ||
 	c == '=' || c == '<' || c == '>' || c == '`'
 }
 is_placeholder_delim :: proc(next: rune, following: rune) -> bool {
