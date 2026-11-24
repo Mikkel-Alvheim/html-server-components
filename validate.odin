@@ -64,6 +64,10 @@ C0_CONTROL :: unicode.Range {
 	ranges_16 = {0x0000, 0x001F}
 }
 
+OTHER_ES_NUMERIC_LITERAL :: unicode.Range {
+	single_16 = {'+', '-', '.', '_', 'n', 'e', 'E', 'b', 'B', 'o', 'O', 'x', 'X'}
+}
+
 is_control :: proc(c: rune) -> bool {
 	return unicode.in_range(c, C0_CONTROL) || (c >= '\u007f' && c <= '\u009f')
 }
@@ -167,4 +171,7 @@ is_es_ident_continue :: proc(c: rune) -> bool {
 }
 is_es_line_terminator :: proc(c: rune) -> bool {
 	return c == '\n' || c == '\r' || c == 0x2028 || c == 0x2029
+}
+is_es_numeric_literal_char :: proc(c: rune) -> bool {
+	return is_digit_ASCII(c) || unicode.in_range(c, OTHER_ES_NUMERIC_LITERAL)
 }
