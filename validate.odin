@@ -1,24 +1,77 @@
 package main
 
-is_c0_control :: proc(c: rune) -> bool {
-	return c >= '\u0000' && c <= '\u001f'
+import "core:unicode"
+
+OTHER_ID_START :: unicode.Range {
+	single_16 = {0x2118, 0x212E},
+	ranges_16 = {
+		0x1885, 0x1886,
+		0x309B, 0x309C
+	}
 }
+OTHER_ID_CONTINUE :: unicode.Range {
+	single_16 = {0x00B7, 0x0387, 0x19DA, 0x30FB, 0xFF65},
+	ranges_16 = {
+		0x1369, 0x1371,
+		0x200C, 0x200D
+	}
+}
+PATTERN_WHITESPACE :: unicode.Range {
+    single_16 = {0x0020, 0x0085},
+    ranges_16 = {
+    	0x0009, 0x000D,
+     	0x200E, 0x200F,
+      	0x2028, 0x2029
+    }
+}
+PATTERN_SYNTAX :: unicode.Range {
+    single_16 = {
+        0x0060, 0x00A9, 0x00AE, 0x00B6,
+        0x00BB, 0x00BF, 0x00D7, 0x00F7,
+        0x3030, 0xFD3E, 0xFD3F,
+    },
+    ranges_16 = {
+        0x0021, 0x002F,
+        0x003A, 0x0040,
+        0x005B, 0x005E,
+        0x007B, 0x007E,
+        0x00A1, 0x00A7,
+        0x00AB, 0x00AC,
+        0x00B0, 0x00B1,
+        0x2010, 0x2027,
+        0x2030, 0x203E,
+        0x2041, 0x2053,
+        0x2055, 0x205E,
+        0x2190, 0x245F,
+        0x2500, 0x2775,
+        0x2794, 0x2BFF,
+        0x2E00, 0x2E7F,
+        0x3001, 0x3003,
+        0x3008, 0x3020,
+        0xFE45, 0xFE46,
+    },
+}
+NON_CHARACTER :: unicode.Range {
+	ranges_16 = {0xFDD0, 0xFDEF, 0xFFFE, 0xFFFF},
+	single_32 = {
+		0x1FFFE, 0x1FFFF, 0x2FFFE, 0x2FFFF, 0x3FFFE, 0x3FFFF, 0x4FFFE, 0x4FFFF,
+		0x5FFFE, 0x5FFFF, 0x6FFFE, 0x6FFFF, 0x7FFFE, 0x7FFFF, 0x8FFFE, 0x8FFFF,
+		0x9FFFE, 0x9FFFF, 0xAFFFE, 0xAFFFF, 0xBFFFE, 0xBFFFF, 0xCFFFE, 0xCFFFF,
+		0xDFFFE, 0xDFFFF, 0xEFFFE, 0xEFFFF, 0xFFFFE, 0xFFFFF, 0x10FFFE, 0x10FFFF,
+	}
+}
+C0_CONTROL :: unicode.Range {
+	ranges_16 = {0x0000, 0x001F}
+}
+
 is_control :: proc(c: rune) -> bool {
-	return is_c0_control(c) || (c >= '\u007f' && c <= '\u009f')
+	return unicode.in_range(c, C0_CONTROL) || (c >= '\u007f' && c <= '\u009f')
 }
 is_noncharacter :: proc(c: rune) -> bool {
-	return (c >= '\ufdd0' && c <= '\ufdef') || c == '\ufffe' || c == '\uffff' ||
-	c == '\U0001fffe' || c == '\U0001ffff' || c == '\U0002fffe' || c == '\U0002ffff' ||
-	c == '\U0003fffe' || c == '\U0003ffff' || c == '\U0004fffe' || c == '\U0004ffff' ||
-	c == '\U0005fffe' || c == '\U0005ffff' || c == '\U0006fffe' || c == '\U0006ffff' ||
-	c == '\U0007fffe' || c == '\U0007ffff' || c == '\U0008fffe' || c == '\U0008ffff' ||
-	c == '\U0009fffe' || c == '\U0009ffff' || c == '\U000afffe' || c == '\U000affff' ||
-	c == '\U000bfffe' || c == '\U000bffff' || c == '\U000cfffe' || c == '\U000cffff' ||
-	c == '\U000dfffe' || c == '\U000dffff' || c == '\U000efffe' || c == '\U000effff' ||
-	c == '\U000ffffe' || c == '\U000fffff' || c == '\U0010fffe' || c == '\U0010ffff'
+	return unicode.in_range(c, NON_CHARACTER)
 }
 is_attr_name_char :: proc(c: rune) -> bool {
-	return !is_control(c) && !is_noncharacter(c) && !is_quoted(c) &&
+	return !unicode.is_control(c) && !is_noncharacter(c) && !is_quoted(c) &&
 	!is_el_close_delim(c) && c != ' ' && c != PLACEHOLDER_DELIM && c != ATTR_INFIX
 }
 is_whitespace_ASCII :: proc(c: rune) -> bool {
@@ -87,4 +140,28 @@ is_valid_custom_element_name :: proc(name: string) -> bool {
 		}
 	}
 	return contains_hyphen
+}
+
+is_id_start :: proc(c: rune) -> bool {
+	if unicode.in_range(c, PATTERN_WHITESPACE) || unicode.in_range(c, PATTERN_SYNTAX) {
+		return false
+	}
+	return unicode.is_letter(c) ||
+	unicode.in_range(c, unicode.nl_ranges) || unicode.in_range(c, OTHER_ID_START)
+}
+is_id_continue :: proc(c: rune) -> bool {
+	if unicode.in_range(c, PATTERN_WHITESPACE) || unicode.in_range(c, PATTERN_SYNTAX) {
+		return false
+	}
+	return is_id_start(c) || unicode.is_nonspacing_mark(c) || unicode.is_decimal(c) ||
+	unicode.in_range(c, unicode.mc_ranges) ||
+	unicode.in_range(c, unicode.pc_ranges) ||
+	unicode.in_range(c, OTHER_ID_CONTINUE)
+}
+
+is_es_ident_start :: proc(c: rune) -> bool {
+	return is_id_start(c) || c == '$' || c == '_'
+}
+is_es_ident_continue :: proc(c: rune) -> bool {
+	return is_id_continue(c) || c == '$'
 }
