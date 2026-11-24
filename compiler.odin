@@ -1,5 +1,7 @@
 package main
 
+import "core:unicode"
+import "core:unicode/utf8/utf8string"
 import "core:fmt"
 // 3.1 Collect all top level templates in ASTs.
 // 3.1.1 Scan the top level of ASTs for Elements with name = template.
@@ -46,6 +48,7 @@ Server_Component :: struct {
 
 Prop :: struct {
 	name: string,
+	type: string,
 	children: [dynamic]Prop
 }
 
@@ -67,13 +70,19 @@ collect_templates :: proc(
 	asts: []^Element, allocator := context.allocator
 ) -> (templates: [dynamic]Template_Declaration) {
 	templates.allocator = allocator
-	for element in asts {
-		if element.name != "template" {
-			continue
-		}
-		id, found := try_get_attribute_value(element.attributes[:], "id")
-		if found && is_valid_custom_element_name(id) {
-			append(&templates, {id, element})
+	for document in asts {
+		for i in 0..<len(document.content) {
+			element := (&document.content[i].(Element)) or_continue
+			if element.name != "template" {
+				continue
+			}
+			id, found := try_get_attribute_value(element.attributes[:], "id")
+			if found && is_valid_custom_element_name(id) {
+				append(&templates, {id, element})
+				fmt.printfln("%sFound component template: %s%s",
+					ANSI_INFO, id, ANSI_RESET
+				)
+			}
 		}
 	}
 	return templates
@@ -98,14 +107,6 @@ build_server_component :: proc(template: Template_Declaration) -> Server_Compone
 	}
 }
 
-collect_parameters :: proc(
-	t: Template_Declaration, allocator := context.allocator
-) -> (parameters: [dynamic]Prop) {
-	parameters.allocator = allocator
-	// Logic goes here
-	return parameters
-}
-
 collect_slots :: proc(
 	t: Template_Declaration, allocator := context.allocator
 ) -> (slots: [dynamic]string) {
@@ -116,10 +117,7 @@ collect_slots :: proc(
 
 append_slots :: proc(slots: ^[dynamic]string, content: ^[dynamic]Node) {
 	for i in 0..<len(content) {
-		element, ok := &content[i].(Element)
-		if !ok {
-			continue
-		}
+		element := (&content[i].(Element)) or_continue
 		if element.name == "slot" {
 			slot_name, found := try_get_attribute_value(element.attributes[:], "name")
 			if !found {
@@ -160,3 +158,111 @@ get_available_default_slot_name :: proc(slots: []string) -> string {
 	}
 	panic("Tried to assign more than 255 unnamed slots to component.")
 }
+
+collect_parameters :: proc(
+	t: Template_Declaration, allocator := context.allocator
+) -> (parameters: [dynamic]Prop) {
+	parameters.allocator = allocator
+	// Logic goes here
+	ids: [dynamic]string
+	ids.allocator = allocator
+	for attribute in t.element.attributes {
+		for i in 0..<len(attribute.name_slices) {
+			slice := attribute.name_slices[i].(Placeholder) or_continue
+			append_identifiers_in_placeholder(slice.expression, &ids)
+		}
+	}
+	return parameters
+}
+
+get_props_in_placeholder :: proc(expression: string) {
+	previous, current: rune
+	for r, i in expression {
+		if r == 'p' && (i == 0 || unicode.is_white_space(previous))  {
+
+		}
+	}
+}
+append_identifiers_in_placeholder :: proc(
+	expression: string, ids: ^[dynamic]string
+) {
+	source: utf8string.String
+	utf8string.init(&source, expression)
+	scanner: Scanner = {&source, 0}
+
+	for !at_end(&scanner) {
+		next := peek(&scanner)
+		switch {
+		case is_quoted(next):
+			read_es_string(&scanner)
+		case next == '/':
+			_, is_comment := read_any(&scanner, {"/", "*"})
+			if is_comment {
+				read_es_comment(&scanner)
+			}
+			else {
+				panic(fmt.tprintfln("Unimplemented ES syntax: %v",
+					mark_source(&scanner, scanner.pos)
+				))
+			}
+		case is_digit_ASCII(next):
+			read_es_number(&scanner)
+		case:
+			id := read_es_identifier(&scanner)
+			fmt.printfln("%sFound identifier: %s%s", ANSI_OK, id, ANSI_RESET)
+			append(ids, id)
+		}
+	}
+}
+
+read_es_identifier :: proc(scan: ^Scanner) -> string {
+	fmt.println("Entered read_es_identifier.")
+	start := scan.pos
+	assert(is_es_ident_start(peek(scan)))
+	read_while(scan, is_es_ident_continue)
+	identifier := utf8string.slice(scan.source, start, scan.pos)
+	fmt.printfln("\t%sIdentifier: %s%s", ANSI_OK, identifier, ANSI_RESET)
+	return identifier
+}
+
+read_es_string :: proc(scan: ^Scanner) -> string {
+	fmt.println("Entered read_es_string.")
+	start := scan.pos
+	delimiter := read(scan)
+	assert(is_quoted(delimiter))
+	for {
+		read_until(scan, delimiter, inclusive = true)
+		if peek(scan, -2) !='\\' {
+			break
+		}
+	}
+	reading := utf8string.slice(scan.source, start, scan.pos)
+	fmt.printfln("%sString: %s%s", ANSI_OK, reading, ANSI_RESET)
+	return reading
+}
+
+read_es_number :: proc(scan: ^Scanner) -> string {
+	fmt.println("Entered read_es_number.")
+	number := read_while(scan, is_es_numeric_literal_char)
+	fmt.printfln("%sNumber: %s%s", ANSI_OK, number, ANSI_RESET)
+	return number
+}
+
+read_es_comment :: proc(scan: ^Scanner) -> (string, bool) {
+	start := scan.pos
+	expect(scan, '/')
+	switch read(scan) {
+	case '/':
+		read_until(scan, is_es_line_terminator, "line terminator", true)
+	case '*':
+		read_until(scan, "*/", inclusive = true)
+	case:
+		return "", false
+	}
+	return utf8string.slice(scan.source, start, scan.pos), true
+}
+
+// Return type here is some kind of union probably.
+// read_es_template :: proc(scan: ^Scanner) -> []string {
+//
+// }
