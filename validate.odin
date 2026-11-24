@@ -165,3 +165,6 @@ is_es_ident_start :: proc(c: rune) -> bool {
 is_es_ident_continue :: proc(c: rune) -> bool {
 	return is_id_continue(c) || c == '$'
 }
+is_es_line_terminator :: proc(c: rune) -> bool {
+	return c == '\n' || c == '\r' || c == 0x2028 || c == 0x2029
+}
