@@ -522,9 +522,3 @@ parse_text :: proc(scan: ^Scanner) -> Text {
 	// fmt.printfln("%sParsed text:%s \"%s\"", ANSI_OK, ANSI_RESET, text.source)
 	return text
 }
-
-
-
-// TODO:
-// - Extract scanner part out in separate files and convert this to pure parsing to AST.
-// - Use the scanner logic to build the minimum lexical parsing of ecmascript needed to compile parameters in the compiler.
