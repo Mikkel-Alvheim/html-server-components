@@ -10,6 +10,7 @@ ANSI_INFO :: ansi.CSI + ansi.FG_BLUE + ansi.SGR
 ANSI_OK :: ansi.CSI + ansi.FG_GREEN + ansi.SGR
 ANSI_WARN :: ansi.CSI + ansi.FG_YELLOW + ansi.SGR
 ANSI_ERR :: ansi.CSI + ansi.FG_RED + ansi.SGR
+ANSI_BOLD :: ansi.CSI + ansi.BOLD + ansi.SGR
 ANSI_RESET :: ansi.CSI + ansi.RESET + ansi.SGR
 
 /*
@@ -652,14 +653,12 @@ read_while :: proc(p: ^Parser, predicate: proc(rune) -> bool) -> string {
 }
 
 expect_string :: proc(p: ^Parser, s: string) {
-	consumed := read(p, s)
-	if !consumed {
+	if !read(p, s) {
 		panic(fmt.tprintfln("Parsing failed. Did not get expected %s", s))
 	}
 }
 expect_rune :: proc(p: ^Parser, c: rune) {
-	consumed := read(p, c)
-	if !consumed {
+	if !read(p, c) {
 		panic(fmt.tprintfln("Parsing failed. Did not get expected %v", c))
 	}
 }
@@ -672,18 +671,16 @@ expect_if :: proc(p: ^Parser, predicate: proc(rune) -> bool, name: string) {
 	}
 	p.pos += 1
 }
-expect_any :: proc(p: ^Parser, values: []string) {
+expect_any :: proc(p: ^Parser, values: []string) -> string {
 	reading, consumed := read_any(p, values)
 	if !consumed {
 		panic(fmt.tprintfln("Parsing failed. Did not get expected %v:\n%s", values, mark_source(p, p.pos)))
 	}
+	return reading
 }
 expect :: proc{expect_string, expect_rune, expect_if, expect_any}
 
 mark_source :: proc(p: ^Parser, syntax_start: int, mark_length: int = 1) -> string {
-	ANSI_BOLD :: ansi.CSI + ansi.BOLD + ansi.SGR
-	ANSI_RED:: ansi.CSI + ansi.FG_RED + ansi.SGR
-	ANSI_RESET :: ansi.CSI + ansi.RESET + ansi.SGR
 	COLUMNS :: 80
 	MARKING_SYMBOLS :: 2
 	padding := (COLUMNS - MARKING_SYMBOLS - mark_length) / 2
@@ -701,20 +698,17 @@ mark_source :: proc(p: ^Parser, syntax_start: int, mark_length: int = 1) -> stri
 	}
 
 	pre_slice := utf8string.slice(p.source, start, syntax_start)
-
 	unmarked_slice := utf8string.slice(p.source, syntax_start, p.pos)
 	current_slice := utf8string.slice(p.source, p.pos, p.pos + mark_length)
 	post_slice := utf8string.slice(p.source, p.pos + mark_length, end)
 
 	return fmt.tprintf("%s%s%s%s%s[%s]%s%s%s",
-		prefix, pre_slice, ANSI_RED, unmarked_slice, ANSI_BOLD,
+		prefix, pre_slice, ANSI_ERR, unmarked_slice, ANSI_BOLD,
 		current_slice, ANSI_RESET, post_slice, postfix,
 	)
 }
 
 mark_unclosed_tag :: proc(p: ^Parser, tag_start: int) -> string {
-	ANSI_RED:: ansi.CSI + ansi.FG_RED + ansi.SGR
-	ANSI_RESET:: ansi.CSI + ansi.RESET + ansi.SGR
 	COLUMNS :: 80
 	SPLICE_INFIX :: " ... "
 
@@ -726,6 +720,6 @@ mark_unclosed_tag :: proc(p: ^Parser, tag_start: int) -> string {
 	end_slice := utf8string.slice(p.source, p.pos - length, p.pos)
 
 	return fmt.tprintf("%s%s%s%s%s",
-		ANSI_RED, start_slice, SPLICE_INFIX, end_slice, ANSI_RESET
+		ANSI_ERR, start_slice, SPLICE_INFIX, end_slice, ANSI_RESET
 	)
 }
