@@ -1,7 +1,6 @@
 package main
 import "core:unicode/utf8/utf8string"
 import "core:terminal/ansi"
-import "core:math"
 import "core:unicode/utf8"
 import "core:fmt"
 
@@ -132,10 +131,6 @@ ds_maybe_expr_attr = "data-" {
 ds-attr = ds_need_expr_attr | ds_maybe_expr_attr
 */
 
-Parser :: struct {
-	source: ^utf8string.String, pos: int
-}
-
 PLACEHOLDER_DELIM :: '%'
 START_TAG_OPEN :: '<'
 END_TAG_OPEN :: "</"
@@ -228,109 +223,109 @@ print_node :: proc(node: Node, depth := 0, formatting := ANSI_RESET) {
 	}
 }
 
-parse_document :: proc(parser: ^Parser) -> Element {
+parse_document :: proc(scan: ^Scanner) -> Element {
 	document: Element = {
 		name = "document"
 	}
-	for !at_end(parser) {
-		read_while(parser, is_whitespace_ASCII)
-		if at_end(parser) {
+	for !at_end(scan) {
+		read_while(scan, is_whitespace_ASCII)
+		if at_end(scan) {
 			break
 		}
-		parse_children(parser, &document)
-		fmt.printfln("Left parse_children in parse_document. current pos: %d", parser.pos)
+		parse_children(scan, &document)
+		fmt.printfln("Left parse_children in parse_document. current pos: %d", scan.pos)
 	}
 	print_element(document, formatting = ANSI_INFO)
 	return document
 }
 
-parse_element :: proc(parser: ^Parser, element: ^Element) {
-	parse_start_tag(parser, element)
+parse_element :: proc(scan: ^Scanner, element: ^Element) {
+	parse_start_tag(scan, element)
 	if element.type == .Normal {
-		parse_children(parser, element)
+		parse_children(scan, element)
 	}
 	print_element(element^, formatting = ANSI_OK)
 }
 
-parse_children :: proc(p: ^Parser, parent: ^Element) {
+parse_children :: proc(scan: ^Scanner, parent: ^Element) {
 	iteration := 0
 	fmt.printfln("Starting loop in parse_children.")
 	for {
-		if at_end(p) {
+		if at_end(scan) {
 			break
 		}
-		char := peek(p)
-		subsequent_char := peek(p, 1)
+		char := peek(scan)
+		subsequent_char := peek(scan, 1)
 
 		char_string := utf8.runes_to_string({char})
 		defer delete(char_string)
-		fmt.printf("\n%siteration: %d, pos: %d (", ANSI_MAGENTA, iteration, p.pos)
+		fmt.printf("\n%siteration: %d, pos: %d (", ANSI_MAGENTA, iteration, scan.pos)
 		print_escaped(char_string)
 		fmt.printf(")%s\n", ANSI_RESET)
 
 		switch {
 		case char == START_TAG_OPEN && subsequent_char == SOLIDUS:
-			parse_end_tag(p, parent)
+			parse_end_tag(scan, parent)
 			return
 		case char == START_TAG_OPEN && subsequent_char == '!':
-			append(&parent.content, parse_non_html_tag(p))
+			append(&parent.content, parse_non_html_tag(scan))
 		case char == START_TAG_OPEN:
 			child: Element
-			parse_element(p, &child)
+			parse_element(scan, &child)
 			append(&parent.content, child)
 		case char == PLACEHOLDER_DELIM && subsequent_char == BRACKET_OPEN:
-			append(&parent.content, parse_placeholder(p))
+			append(&parent.content, parse_placeholder(scan))
 		case:
-			append(&parent.content, parse_text(p))
+			append(&parent.content, parse_text(scan))
 		}
 		iteration += 1
 	}
 }
 
-parse_non_html_tag :: proc(p: ^Parser) -> Text {
-	fmt.printfln("Entered parse_non_html_tag. current pos: %d", p.pos)
+parse_non_html_tag :: proc(scan: ^Scanner) -> Text {
+	fmt.printfln("Entered parse_non_html_tag. current pos: %d", scan.pos)
 	tag_close_char := utf8.runes_to_string({TAG_CLOSE})
 	defer delete(tag_close_char)
 	text: Text
 
-	start := p.pos
-	opens_comment := read(p, "<!--")
+	start := scan.pos
+	opens_comment := read(scan, "<!--")
 	if opens_comment {
 		fmt.printfln("Starting loop in comment section of parse_non_html_tag.")
-		for closes_comment := false; !closes_comment; p.pos += 1 {
-			read_until_rune(p, '-')
-			closes_comment = read(p, "-->")
+		for closes_comment := false; !closes_comment; scan.pos += 1 {
+			read_until_rune(scan, '-')
+			closes_comment = read(scan, "-->")
 		}
-		text.source = utf8string.slice(p.source, start, p.pos)
+		text.source = utf8string.slice(scan.source, start, scan.pos)
 	}
 	else {
-		text.source = read_until_rune(p, TAG_CLOSE, inclusive = true)
+		text.source = read_until_rune(scan, TAG_CLOSE, inclusive = true)
 	}
 	fmt.printfln("%sNon-html tag:%s %s", ANSI_OK, ANSI_RESET, text.source)
 	return text
 }
 
-parse_start_tag :: proc(p: ^Parser, el: ^Element) {
-	fmt.printfln("Entered parse_start_tag. current pos: %d", p.pos)
-	start := p.pos
-	expect(p, START_TAG_OPEN)
-	el.name = parse_el_name(p)
+parse_start_tag :: proc(scan: ^Scanner, el: ^Element) {
+	fmt.printfln("Entered parse_start_tag. current pos: %d", scan.pos)
+	start := scan.pos
+	expect(scan, START_TAG_OPEN)
+	el.name = parse_el_name(scan)
 	el.type = is_in(VOID_EL_NAMES, el.name) ? .Void : .Normal
 	for {
-		space := read_while(p, is_whitespace_ASCII)
-		switch peek(p) {
+		space := read_while(scan, is_whitespace_ASCII)
+		switch peek(scan) {
 		case TAG_CLOSE:
-			expect(p, TAG_CLOSE)
+			expect(scan, TAG_CLOSE)
 			fmt.printfln("%sStart tag:%s %v\n\ttype: %v\n\tattr:%v",
 				ANSI_OK, ANSI_RESET, el.name, el.type, el.attributes[:],
 			)
 			return
 		case SOLIDUS:
-			expect(p, START_TAG_SELF_CLOSE)
+			expect(scan, START_TAG_SELF_CLOSE)
 			if el.type == .Void {
 				fmt.printfln(
 					"%sElement %s has a solidus before its closing. This marks foreign elements as self closing, but <%s> is a void element where, although permitted, has no effect and may cause bugs if directly preceded by an unquoted attribute value. %s\n:%s",
-					ANSI_WARN, el.name, el.name, ANSI_RESET, mark_source(p, start)
+					ANSI_WARN, el.name, el.name, ANSI_RESET, mark_source(scan, start)
 				)
 			}
 			else {
@@ -342,156 +337,156 @@ parse_start_tag :: proc(p: ^Parser, el: ^Element) {
 			if space == "" {
 				panic(fmt.tprintfln(
 					"Missing closing tag or space between attributes:\n%v",
-					mark_source(p, start)
+					mark_source(scan, start)
 				))
 			}
-			append(&el.attributes, parse_attribute(p))
+			append(&el.attributes, parse_attribute(scan))
 		}
 	}
 }
 
-parse_end_tag :: proc(p: ^Parser, el: ^Element) {
-	fmt.printfln("Entered parse_close_tag. current pos: %d", p.pos)
-	expect(p, END_TAG_OPEN)
-	name := parse_el_name(p)
+parse_end_tag :: proc(scan: ^Scanner, el: ^Element) {
+	fmt.printfln("Entered parse_close_tag. current pos: %d", scan.pos)
+	expect(scan, END_TAG_OPEN)
+	name := parse_el_name(scan)
 	if name != el.name {
 		panic(fmt.tprintfln("Closing tag %v tried to close element %v", name, el.name))
 	}
-	read_while(p, is_whitespace_ASCII)
-	expect(p, TAG_CLOSE)
+	read_while(scan, is_whitespace_ASCII)
+	expect(scan, TAG_CLOSE)
 	fmt.printfln("%sClosing tag:%s %s", ANSI_OK, ANSI_RESET, name)
 }
 
-parse_el_name :: proc(p: ^Parser) -> string {
-	fmt.printfln("Entered parse_name_html. current pos: %d", p.pos)
-	start_pos := p.pos
-	expect(p, is_lower_ASCII, "lowercase")
-	read_while(p, is_el_name_char)
-	name := utf8string.slice(p.source, start_pos, p.pos)
+parse_el_name :: proc(scan: ^Scanner) -> string {
+	fmt.printfln("Entered parse_name_html. current pos: %d", scan.pos)
+	start_pos := scan.pos
+	expect(scan, is_lower_ASCII, "lowercase")
+	read_while(scan, is_el_name_char)
+	name := utf8string.slice(scan.source, start_pos, scan.pos)
 	fmt.printfln("%sElement name:%s %s", ANSI_OK, ANSI_RESET, name)
 	return name
 }
 
-parse_attribute_name :: proc(p: ^Parser, a: ^Attribute) {
-	fmt.printfln("Entered parse_attribute_name. current pos: %d", p.pos)
-	start := p.pos
-	prev_end := p.pos
+parse_attribute_name :: proc(scan: ^Scanner, attr: ^Attribute) {
+	fmt.printfln("Entered parse_attribute_name. current pos: %d", scan.pos)
+	start := scan.pos
+	prev_end := scan.pos
 	for {
-		read_while(p, is_attr_name_char)
-		if peek(p) == PLACEHOLDER_DELIM {
-			if p.pos != prev_end {
+		read_while(scan, is_attr_name_char)
+		if peek(scan) == PLACEHOLDER_DELIM {
+			if scan.pos != prev_end {
 				slice: Text = {source = utf8string.slice(
-					p.source, prev_end, p.pos
+					scan.source, prev_end, scan.pos
 				)}
-				append(&a.name_slices, slice)
+				append(&attr.name_slices, slice)
 			}
-			append(&a.name_slices, parse_placeholder(p))
-			prev_end = p.pos
+			append(&attr.name_slices, parse_placeholder(scan))
+			prev_end = scan.pos
 		}
 		else {
 			break
 		}
 	}
-	if start == p.pos {
+	if start == scan.pos {
 		panic("Parse_attribute_name got 0 valid characters.")
 	}
-	else if p.pos != prev_end {
+	else if scan.pos != prev_end {
 		slice: Text = {source = utf8string.slice(
-			p.source, prev_end, p.pos
+			scan.source, prev_end, scan.pos
 		)}
-		append(&a.name_slices, slice)
+		append(&attr.name_slices, slice)
 	}
-	a.name = utf8string.slice(p.source, start, p.pos)
+	attr.name = utf8string.slice(scan.source, start, scan.pos)
 	fmt.printfln("%sAttribute%s name: %s\nSlices:%v",
-		ANSI_OK, ANSI_RESET, a.name, a.name_slices[:]
+		ANSI_OK, ANSI_RESET, attr.name, attr.name_slices[:]
 	)
 }
 
-parse_attribute :: proc(p: ^Parser) -> Attribute {
-	fmt.printfln("Entered parse_attribute. current pos: %d", p.pos)
+parse_attribute :: proc(scan: ^Scanner) -> Attribute {
+	fmt.printfln("Entered parse_attribute. current pos: %d", scan.pos)
 	attribute: Attribute
-	parse_attribute_name(p, &attribute)
-	read_while(p, is_whitespace_ASCII)
-	char := peek(p)
-	if peek(p) == ATTR_INFIX {
-		expect(p, ATTR_INFIX)
-		read_while(p, is_whitespace_ASCII)
-		if is_quoted(peek(p)) {
-			parse_quoted(p, &attribute)
+	parse_attribute_name(scan, &attribute)
+	read_while(scan, is_whitespace_ASCII)
+	char := peek(scan)
+	if peek(scan) == ATTR_INFIX {
+		expect(scan, ATTR_INFIX)
+		read_while(scan, is_whitespace_ASCII)
+		if is_quoted(peek(scan)) {
+			parse_quoted(scan, &attribute)
 		}
 		else {
-			parse_unqoted(p, &attribute)
+			parse_unqoted(scan, &attribute)
 		}
 	}
 	fmt.printfln("%sAttribute:%s %v", ANSI_OK, ANSI_RESET, attribute)
 	return attribute
 }
 
-parse_quoted :: proc(p: ^Parser, a: ^Attribute) {
-	delim_char := read(p)
-	start := p.pos
-	previous_end := p.pos
+parse_quoted :: proc(scan: ^Scanner, attr: ^Attribute) {
+	delim_char := read(scan)
+	start := scan.pos
+	previous_end := scan.pos
 	fmt.printfln("Entered parse_quoted. Delimiter: [%v]. Current pos: %d",
 		delim_char, start
 	)
-	next := peek(p)
-	following := peek(p, 1)
+	next := peek(scan)
+	following := peek(scan, 1)
 	fmt.println("Starting loop in parse_quoted")
 	for {
 		if is_placeholder_delim(next, following) {
-			if p.pos != previous_end {
+			if scan.pos != previous_end {
 				// Store preceeding section.
 				slice: Text = {source = utf8string.slice(
-					p.source, previous_end, p.pos
+					scan.source, previous_end, scan.pos
 				)}
-				append(&a.value_slices, slice)
+				append(&attr.value_slices, slice)
 			}
-			append(&a.value_slices, parse_placeholder(p))
-			previous_end = p.pos
+			append(&attr.value_slices, parse_placeholder(scan))
+			previous_end = scan.pos
 		}
 		else if next == delim_char {
 			break
 		}
 		else {
-			p.pos += 1
+			scan.pos += 1
 		}
-		next = peek(p)
-		following = peek(p, 1)
+		next = peek(scan)
+		following = peek(scan, 1)
 	}
- 	if p.pos != previous_end {
+ 	if scan.pos != previous_end {
 		slice: Text = {source = utf8string.slice(
-			p.source, previous_end, p.pos
+			scan.source, previous_end, scan.pos
 		)}
-		append(&a.value_slices, slice)
+		append(&attr.value_slices, slice)
 	}
-	a.value = utf8string.slice(p.source, start, p.pos)
-	expect(p, delim_char)
-	fmt.printfln("%sQuoted attribute value: %s%s", ANSI_OK, a.value, ANSI_RESET)
+	attr.value = utf8string.slice(scan.source, start, scan.pos)
+	expect(scan, delim_char)
+	fmt.printfln("%sQuoted attribute value: %s%s", ANSI_OK, attr.value, ANSI_RESET)
 }
 
-parse_unqoted :: proc(p: ^Parser, a: ^Attribute) {
-	fmt.printfln("Entered parse_unquoted. current pos: %d", p.pos)
-	a.value = read_until(p, is_unquoted_attr_value_delim,
+parse_unqoted :: proc(scan: ^Scanner, attr: ^Attribute) {
+	fmt.printfln("Entered parse_unquoted. current pos: %d", scan.pos)
+	attr.value = read_until(scan, is_unquoted_attr_value_delim,
 		"unquoted attribute value delimiter"
 	)
-	slice: Text = {source = a.value}
-	append(&a.value_slices, slice)
+	slice: Text = {source = attr.value}
+	append(&attr.value_slices, slice)
 	// '<' should be consumed by caller.
-	if !is_el_close_delim(peek(p)) {
-		p.pos += 1
+	if !is_el_close_delim(peek(scan)) {
+		scan.pos += 1
 	}
-	fmt.printfln("%sUnqoted attribute value: %s%s", ANSI_OK, a.value, ANSI_RESET)
+	fmt.printfln("%sUnqoted attribute value: %s%s", ANSI_OK, attr.value, ANSI_RESET)
 }
 
-parse_placeholder :: proc(p: ^Parser) -> Placeholder {
-	fmt.printfln("Entered parse_placeholder. current pos: %d", p.pos)
+parse_placeholder :: proc(scan: ^Scanner) -> Placeholder {
+	fmt.printfln("Entered parse_placeholder. current pos: %d", scan.pos)
 
-	expect(p, PLACEHOLDER_DELIM)
-	expect(p, BRACKET_OPEN)
-	start := p.pos
+	expect(scan, PLACEHOLDER_DELIM)
+	expect(scan, BRACKET_OPEN)
+	start := scan.pos
 	nesting :u8 = 0
 	fmt.println("Starting loop in parse_placeholder")
-	for char := read(p); char != BRACKET_CLOSE || nesting != 0; char = read(p) {
+	for char := read(scan); char != BRACKET_CLOSE || nesting != 0; char = read(scan) {
 		if char == utf8.RUNE_EOF {
 			panic("Missing closing bracket for placeholder.")
 		}
@@ -504,222 +499,32 @@ parse_placeholder :: proc(p: ^Parser) -> Placeholder {
 	}
 	// We avoid returning closing '}', but still consume it.
 	placeholder : Placeholder = {
-		expression = utf8string.slice(p.source, start, p.pos - 1)
+		expression = utf8string.slice(scan.source, start, scan.pos - 1)
 	}
 	print_node(placeholder, formatting = ANSI_OK)
 	// fmt.printfln("%sPlaceholder expression:%s %s", ANSI_OK, ANSI_RESET, placeholder.expression)
 	return placeholder
 }
 
-parse_text :: proc(p: ^Parser) -> Text {
-	fmt.printfln("Entered parse_text. current pos: %d", p.pos)
+parse_text :: proc(scan: ^Scanner) -> Text {
+	fmt.printfln("Entered parse_text. current pos: %d", scan.pos)
 
-	start := p.pos
+	start := scan.pos
 	fmt.println("Starting loop in parse_text")
-	for char := peek(p); char != START_TAG_OPEN && (char != PLACEHOLDER_DELIM && peek(p, 1) != BRACKET_OPEN); char = peek(p) {
-		if at_end(p) {
+	for char := peek(scan); char != START_TAG_OPEN && (char != PLACEHOLDER_DELIM && peek(scan, 1) != BRACKET_OPEN); char = peek(scan) {
+		if at_end(scan) {
 			break
 		}
-		p.pos += 1
+		scan.pos += 1
 	}
-	text: Text = {source = utf8string.slice(p.source, start, p.pos)}
+	text: Text = {source = utf8string.slice(scan.source, start, scan.pos)}
 	print_node(text, formatting = ANSI_OK)
 	// fmt.printfln("%sParsed text:%s \"%s\"", ANSI_OK, ANSI_RESET, text.source)
 	return text
 }
 
-at_end :: proc(p: ^Parser, offset := 0) -> bool {
-	return p.pos + offset >= p.source.rune_count
-}
 
-peek :: proc(p: ^Parser, offset := 0) -> rune {
-	return at_end(p, offset) ? utf8.RUNE_EOF : utf8string.at(p.source, p.pos + offset)
-}
 
-read_next :: proc(p: ^Parser) -> rune {
-	char := peek(p)
-	if char != utf8.RUNE_EOF {
-		p.pos += 1
-	}
-	return char
-
-}
-read_string :: proc(p: ^Parser, s: string) -> bool {
-	length := utf8.rune_count(s)
-	if at_end(p, length) || utf8string.slice(p.source, p.pos, p.pos + length) != s {
-		return false
-	}
-	p.pos += length
-	return true
-}
-read_rune :: proc(parser: ^Parser, c: rune) -> bool {
-	if peek(parser) != c {
-		return false
-	}
-	parser.pos += 1
-	return true
-}
-read :: proc{read_next, read_string, read_rune}
-
-read_until_rune :: proc(p: ^Parser, delimiter: rune, inclusive := false) -> string {
-	start := p.pos
-	fmt.println("Starting loop in read_until_rune")
-	for char := peek(p); char != delimiter; char = peek(p) {
-		if char == utf8.RUNE_EOF {
-			panic(fmt.tprintfln("Missing closing delimiter: %v\n%s",
-				delimiter, mark_unclosed_tag(p, start)
-			))
-		}
-		p.pos += 1
-	}
-	if inclusive {
-		p.pos += 1
-	}
-	consumed := utf8string.slice(p.source, start, p.pos)
-	fmt.printf("%sRead:%s ", ANSI_INFO, ANSI_RESET)
-	print_escaped(consumed)
-	fmt.print("\n")
-	return consumed
-}
-read_until_predicate :: proc(
-	p: ^Parser, predicate: proc(rune) -> bool, name: string, inclusive := false
-) -> string {
-	start := p.pos
-	fmt.printfln("Starting loop in read_until_predicate for %s", name)
-	for char := peek(p); !predicate(char); char = peek(p) {
-		if char == utf8.RUNE_EOF {
-			panic(fmt.tprintfln("Missing closing delimiter: %v\n%s",
-				name, mark_unclosed_tag(p, start)
-			))
-		}
-		p.pos += 1
-	}
-	if inclusive {
-		p.pos += 1
-	}
-	consumed := utf8string.slice(p.source, start, p.pos)
-	fmt.printf("%sRead:%s ", ANSI_INFO, ANSI_RESET)
-	print_escaped(consumed)
-	fmt.print("\n")
-	return consumed
-}
-read_until :: proc{read_until_rune, read_until_predicate}
-
-read_any :: proc(p: ^Parser, values: []string) -> (string, bool) {
-	fmt.println("Starting loop in read_any")
-	for value in values {
-		consumed := read(p, value)
-		if consumed {
-			fmt.printf("%sRead:%s ", ANSI_INFO, ANSI_RESET)
-			print_escaped(value)
-			fmt.print("\n")
-			return value, true
-		}
-	}
-	fmt.printfln("%sDid not read anything%s", ANSI_INFO, ANSI_RESET)
-	return "", false
-}
-read_all :: proc(p: ^Parser, values: []string) -> string {
-	start := p.pos
-	fmt.println("Starting loop in read_all")
-	for {
-		reading, consumed := read_any(p, values)
-		// TODO: Introduce hard limit on iteration
-		if !consumed {
-			consumed_text := utf8string.slice(p.source, start, p.pos)
-			fmt.printf("%sRead:%s ", ANSI_INFO, ANSI_RESET)
-			print_escaped(consumed_text)
-			fmt.print("\n")
-			return consumed_text
-		}
-	}
-}
-read_while :: proc(p: ^Parser, predicate: proc(rune) -> bool) -> string {
-	start := p.pos
-	fmt.println("Starting loop in read_while")
-	for char := peek(p); char != utf8.RUNE_EOF && predicate(char); char = peek(p) {
-		p.pos += 1
-	}
-	consumed_text := utf8string.slice(p.source, start, p.pos)
-	if consumed_text != "" {
-		fmt.printf("%sRead:%s ", ANSI_INFO, ANSI_RESET)
-		print_escaped(consumed_text)
-		fmt.print("\n")
-	}
-	else {
-		fmt.printfln("%sDid not read anything%s", ANSI_INFO, ANSI_RESET)
-	}
-	return consumed_text
-}
-
-expect_string :: proc(p: ^Parser, s: string) {
-	if !read(p, s) {
-		panic(fmt.tprintfln("Parsing failed. Did not get expected %s", s))
-	}
-}
-expect_rune :: proc(p: ^Parser, c: rune) {
-	if !read(p, c) {
-		panic(fmt.tprintfln("Parsing failed. Did not get expected %v", c))
-	}
-}
-expect_if :: proc(p: ^Parser, predicate: proc(rune) -> bool, name: string) {
-	c := peek(p)
-	if c == utf8.RUNE_EOF || !predicate(c) {
-		panic(fmt.tprintfln(
-			"Parsing failed. Did not get expected %s", name
-		))
-	}
-	p.pos += 1
-}
-expect_any :: proc(p: ^Parser, values: []string) -> string {
-	reading, consumed := read_any(p, values)
-	if !consumed {
-		panic(fmt.tprintfln("Parsing failed. Did not get expected %v:\n%s", values, mark_source(p, p.pos)))
-	}
-	return reading
-}
-expect :: proc{expect_string, expect_rune, expect_if, expect_any}
-
-mark_source :: proc(p: ^Parser, syntax_start: int, mark_length: int = 1) -> string {
-	COLUMNS :: 80
-	MARKING_SYMBOLS :: 2
-	padding := (COLUMNS - MARKING_SYMBOLS - mark_length) / 2
-	start := math.max(0, p.pos - padding)
-	end := math.min(p.source.rune_count, p.pos + padding)
-
-	prefix, postfix: string
-	if start >= 3 {
-		start += 3
-		prefix = "..."
-	}
-	if end <= p.source.rune_count - 3 {
-		end -= 3
-		postfix = "..."
-	}
-
-	pre_slice := utf8string.slice(p.source, start, syntax_start)
-	unmarked_slice := utf8string.slice(p.source, syntax_start, p.pos)
-	current_slice := utf8string.slice(p.source, p.pos, p.pos + mark_length)
-	post_slice := utf8string.slice(p.source, p.pos + mark_length, end)
-
-	return fmt.tprintf("%s%s%s%s%s[%s]%s%s%s",
-		prefix, pre_slice, ANSI_ERR, unmarked_slice, ANSI_BOLD,
-		current_slice, ANSI_RESET, post_slice, postfix,
-	)
-}
-
-mark_unclosed_tag :: proc(p: ^Parser, tag_start: int) -> string {
-	COLUMNS :: 80
-	SPLICE_INFIX :: " ... "
-
-	if p.pos - tag_start <= 80 {
-		return utf8string.slice(p.source, tag_start, p.pos)
-	}
-	length := (COLUMNS / 2) - utf8.rune_count(SPLICE_INFIX)
-	start_slice := utf8string.slice(p.source, tag_start, tag_start + length)
-	end_slice := utf8string.slice(p.source, p.pos - length, p.pos)
-
-	return fmt.tprintf("%s%s%s%s%s",
-		ANSI_ERR, start_slice, SPLICE_INFIX, end_slice, ANSI_RESET
-	)
-}
+// TODO:
+// - Extract scanner part out in separate files and convert this to pure parsing to AST.
+// - Use the scanner logic to build the minimum lexical parsing of ecmascript needed to compile parameters in the compiler.
