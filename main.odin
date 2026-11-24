@@ -22,6 +22,7 @@ main :: proc() {
 		panic("Could not read input directory.")
 	}
 	asts : [dynamic]^Element
+	defer delete(asts)
 	for file, i in files {
 		fmt.printf("%d: %s\n", i, file.name)
 		if os.ext(file.fullpath) != ".html" {
