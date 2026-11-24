@@ -63,6 +63,25 @@ read_until_rune :: proc(
 	fmt.print("\n")
 	return consumed
 }
+
+read_until_string :: proc(
+	scan: ^Scanner, delimiter: string, inclusive := false
+) -> string {
+	start := scan.pos
+	fmt.println("Starting loop in read_until_string")
+	for !read(scan, delimiter) {
+		scan.pos += 1
+	}
+	if inclusive {
+		scan.pos += utf8.rune_count_in_string(delimiter)
+	}
+	consumed := utf8string.slice(scan.source, start, scan.pos)
+	fmt.printf("%sRead:%s ", ANSI_INFO, ANSI_RESET)
+	print_escaped(consumed)
+	fmt.print("\n")
+	return consumed
+}
+
 read_until_predicate :: proc(
 	scan: ^Scanner, predicate: proc(rune) -> bool, name: string, inclusive := false
 ) -> string {
@@ -85,7 +104,7 @@ read_until_predicate :: proc(
 	fmt.print("\n")
 	return consumed
 }
-read_until :: proc{read_until_rune, read_until_predicate}
+read_until :: proc{read_until_rune, read_until_string, read_until_predicate}
 
 read_any :: proc(scan: ^Scanner, matches: []string) -> (string, bool) {
 	fmt.println("Starting loop in read_any")
