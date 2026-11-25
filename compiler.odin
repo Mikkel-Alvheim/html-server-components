@@ -1,8 +1,9 @@
 package main
 
-import "core:unicode"
+import "core:terminal/ansi"
 import "core:unicode/utf8/utf8string"
 import "core:fmt"
+
 // 3.1 Collect all top level templates in ASTs.
 // 3.1.1 Scan the top level of ASTs for Elements with name = template.
 // 3.1.2 Validate: Attribute id must exist.
@@ -80,7 +81,7 @@ collect_templates :: proc(
 			if found && is_valid_custom_element_name(id) {
 				append(&templates, {id, element})
 				fmt.printfln("%sFound component template: %s%s",
-					ANSI_INFO, id, ANSI_RESET
+					sgr(ANSI_INFO), id, sgr(ansi.RESET)
 				)
 			}
 		}
@@ -162,35 +163,58 @@ get_available_default_slot_name :: proc(slots: []string) -> string {
 collect_parameters :: proc(
 	t: Template_Declaration, allocator := context.allocator
 ) -> (parameters: [dynamic]Prop) {
+	fmt.println("Entered collect_parameters")
 	parameters.allocator = allocator
-	// Logic goes here
 	ids: [dynamic]string
 	ids.allocator = allocator
-	for attribute in t.element.attributes {
-		for i in 0..<len(attribute.name_slices) {
-			slice := attribute.name_slices[i].(Placeholder) or_continue
-			append_identifiers_in_placeholder(slice.expression, &ids)
-		}
-	}
+	append_identifiers_from_element(t.element^, &ids)
 	return parameters
 }
+append_identifiers_from_element :: proc(element: Element, ids: ^[dynamic]string) {
+	fmt.println("Entered append_identifiers_from_element")
+	append_identifiers_from_attributes(element.attributes, ids)
+	for content in element.content {
+		switch node in content {
+		case Placeholder:
+			append_identifiers_in_placeholder(node.expression, ids)
+		case Element:
+			append_identifiers_from_element(node, ids)
+		case Text:
+			break
+		}
+	}
+}
 
-get_props_in_placeholder :: proc(expression: string) {
-	previous, current: rune
-	for r, i in expression {
-		if r == 'p' && (i == 0 || unicode.is_white_space(previous))  {
-
+append_identifiers_from_attributes :: proc(attributes: [dynamic]Attribute, ids: ^[dynamic]string) {
+	fmt.printfln("Entered append_identifiers_from_attributes")
+	for attr in attributes {
+		fmt.printfln("\tIn outer loop: %v", attr)
+		for slice, i in attr.name_slices {
+			fmt.printfln("\tName_slices inner loop %v/%v",
+				i+1, len(attr.name_slices)
+			)
+			placeholder := slice.(Placeholder) or_continue
+			append_identifiers_in_placeholder(placeholder.expression, ids)
+		}
+		for slice, i in attr.value_slices {
+			fmt.printfln("\tValue_slices inner loop: %v/%v",
+				i+1, len(attr.value_slices)
+			)
+			placeholder := slice.(Placeholder) or_continue
+			append_identifiers_in_placeholder(placeholder.expression, ids)
 		}
 	}
 }
 append_identifiers_in_placeholder :: proc(
 	expression: string, ids: ^[dynamic]string
 ) {
+	fmt.println("Entered append_identifiers_in_placeholder")
 	source: utf8string.String
 	utf8string.init(&source, expression)
 	scanner: Scanner = {&source, 0}
 
 	for !at_end(&scanner) {
+		read_while(&scanner, is_whitespace_ASCII)
 		next := peek(&scanner)
 		switch {
 		case is_quoted(next):
@@ -207,10 +231,17 @@ append_identifiers_in_placeholder :: proc(
 			}
 		case is_digit_ASCII(next):
 			read_es_number(&scanner)
-		case:
+		case is_es_ident_start(next):
 			id := read_es_identifier(&scanner)
-			fmt.printfln("%sFound identifier: %s%s", ANSI_OK, id, ANSI_RESET)
+			fmt.printfln("%sFound identifier: %s%s", sgr(ANSI_OK), id, sgr(ansi.RESET))
 			append(ids, id)
+		case:
+			fmt.printfln("%sWarning:%s unhandled char at start of token: [%v]%s",
+				sgr(ANSI_WARN, ansi.BOLD),
+				sgr(ansi.RESET, ANSI_WARN),
+				next,
+				sgr(ansi.RESET)
+			)
 		}
 	}
 }
@@ -218,10 +249,14 @@ append_identifiers_in_placeholder :: proc(
 read_es_identifier :: proc(scan: ^Scanner) -> string {
 	fmt.println("Entered read_es_identifier.")
 	start := scan.pos
-	assert(is_es_ident_start(peek(scan)))
+	if !is_es_ident_start(read(scan)) {
+		panic(fmt.tprintf("%sInvalid start char in read_es_identifier:%s\n%s",
+			ANSI_ERR, sgr(ansi.RESET), mark_source(scan, start))
+		)
+	}
 	read_while(scan, is_es_ident_continue)
 	identifier := utf8string.slice(scan.source, start, scan.pos)
-	fmt.printfln("\t%sIdentifier: %s%s", ANSI_OK, identifier, ANSI_RESET)
+	fmt.printfln("\t%sIdentifier: %s%s", sgr(ANSI_OK), identifier, sgr(ansi.RESET))
 	return identifier
 }
 
@@ -237,14 +272,14 @@ read_es_string :: proc(scan: ^Scanner) -> string {
 		}
 	}
 	reading := utf8string.slice(scan.source, start, scan.pos)
-	fmt.printfln("%sString: %s%s", ANSI_OK, reading, ANSI_RESET)
+	fmt.printfln("%sString: %s%s", sgr(ANSI_OK), reading, sgr(ansi.RESET))
 	return reading
 }
 
 read_es_number :: proc(scan: ^Scanner) -> string {
 	fmt.println("Entered read_es_number.")
 	number := read_while(scan, is_es_numeric_literal_char)
-	fmt.printfln("%sNumber: %s%s", ANSI_OK, number, ANSI_RESET)
+	fmt.printfln("%sNumber: %s%s", sgr(ANSI_OK), number, sgr(ansi.RESET))
 	return number
 }
 
