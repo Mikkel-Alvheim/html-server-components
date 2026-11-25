@@ -1,5 +1,6 @@
 package main
 import "core:fmt"
+import "core:terminal/ansi"
 import "core:unicode/utf8"
 import "core:unicode/utf8/utf8string"
 import "core:math"
@@ -58,7 +59,7 @@ read_until_rune :: proc(
 		scan.pos += 1
 	}
 	consumed := utf8string.slice(scan.source, start, scan.pos)
-	fmt.printf("%sRead:%s ", ANSI_INFO, ANSI_RESET)
+	fmt.printf("%sRead:%s ", sgr(sgr(ANSI_INFO)), sgr(ansi.RESET))
 	print_escaped(consumed)
 	fmt.print("\n")
 	return consumed
@@ -76,7 +77,7 @@ read_until_string :: proc(
 		scan.pos += utf8.rune_count_in_string(delimiter)
 	}
 	consumed := utf8string.slice(scan.source, start, scan.pos)
-	fmt.printf("%sRead:%s ", ANSI_INFO, ANSI_RESET)
+	fmt.printf("%sRead:%s ", sgr(ANSI_INFO), sgr(ansi.RESET))
 	print_escaped(consumed)
 	fmt.print("\n")
 	return consumed
@@ -99,7 +100,7 @@ read_until_predicate :: proc(
 		scan.pos += 1
 	}
 	consumed := utf8string.slice(scan.source, start, scan.pos)
-	fmt.printf("%sRead:%s ", ANSI_INFO, ANSI_RESET)
+	fmt.printf("%sRead:%s ", sgr(ANSI_INFO), sgr(ansi.RESET))
 	print_escaped(consumed)
 	fmt.print("\n")
 	return consumed
@@ -111,13 +112,13 @@ read_any :: proc(scan: ^Scanner, matches: []string) -> (string, bool) {
 	for match in matches {
 		consumed := read(scan, match)
 		if consumed {
-			fmt.printf("%sRead:%s ", ANSI_INFO, ANSI_RESET)
+			fmt.printf("%sRead:%s ", sgr(ANSI_INFO), sgr(ansi.RESET))
 			print_escaped(match)
 			fmt.print("\n")
 			return match, true
 		}
 	}
-	fmt.printfln("%sDid not read anything%s", ANSI_INFO, ANSI_RESET)
+	fmt.printfln("%sDid not read anything%s", sgr(ANSI_INFO), sgr(ansi.RESET))
 	return "", false
 }
 read_all :: proc(scan: ^Scanner, match: []string) -> string {
@@ -128,7 +129,7 @@ read_all :: proc(scan: ^Scanner, match: []string) -> string {
 		// TODO: Introduce hard limit on iteration
 		if !consumed {
 			consumed_text := utf8string.slice(scan.source, start, scan.pos)
-			fmt.printf("%sRead:%s ", ANSI_INFO, ANSI_RESET)
+			fmt.printf("%sRead:%s ", sgr(ANSI_INFO), sgr(ansi.RESET))
 			print_escaped(consumed_text)
 			fmt.print("\n")
 			return consumed_text
@@ -143,12 +144,12 @@ read_while :: proc(scan: ^Scanner, predicate: proc(rune) -> bool) -> string {
 	}
 	consumed_text := utf8string.slice(scan.source, start, scan.pos)
 	if consumed_text != "" {
-		fmt.printf("%sRead:%s ", ANSI_INFO, ANSI_RESET)
+		fmt.printf("%sRead:%s ", sgr(ANSI_INFO), sgr(ansi.RESET))
 		print_escaped(consumed_text)
 		fmt.print("\n")
 	}
 	else {
-		fmt.printfln("%sDid not read anything%s", ANSI_INFO, ANSI_RESET)
+		fmt.printfln("%sDid not read anything%s", sgr(ANSI_INFO), sgr(ansi.RESET))
 	}
 	return consumed_text
 }
@@ -206,8 +207,8 @@ mark_source :: proc(scan: ^Scanner, syntax_start: int, mark_length: int = 1) -> 
 	post_slice := utf8string.slice(scan.source, scan.pos + mark_length, end)
 
 	return fmt.tprintf("%s%s%s%s%s[%s]%s%s%s",
-		prefix, pre_slice, ANSI_ERR, unmarked_slice, ANSI_BOLD,
-		current_slice, ANSI_RESET, post_slice, postfix,
+		prefix, pre_slice, sgr(ANSI_ERR), unmarked_slice, sgr(ansi.BOLD),
+		current_slice, sgr(ansi.RESET), post_slice, postfix,
 	)
 }
 
@@ -223,6 +224,6 @@ mark_unclosed_tag :: proc(scan: ^Scanner, tag_start: int) -> string {
 	end_slice := utf8string.slice(scan.source, scan.pos - length, scan.pos)
 
 	return fmt.tprintf("%s%s%s%s%s",
-		ANSI_ERR, start_slice, SPLICE_INFIX, end_slice, ANSI_RESET
+		sgr(ANSI_ERR), start_slice, SPLICE_INFIX, end_slice, sgr(ansi.RESET)
 	)
 }

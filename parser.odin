@@ -1,16 +1,8 @@
 package main
 import "core:unicode/utf8/utf8string"
-import "core:terminal/ansi"
 import "core:unicode/utf8"
 import "core:fmt"
-
-ANSI_MAGENTA :: ansi.CSI + ansi.FG_MAGENTA + ansi.SGR
-ANSI_INFO :: ansi.CSI + ansi.FG_BLUE + ansi.SGR
-ANSI_OK :: ansi.CSI + ansi.FG_GREEN + ansi.SGR
-ANSI_WARN :: ansi.CSI + ansi.FG_YELLOW + ansi.SGR
-ANSI_ERR :: ansi.CSI + ansi.FG_RED + ansi.SGR
-ANSI_BOLD :: ansi.CSI + ansi.BOLD + ansi.SGR
-ANSI_RESET :: ansi.CSI + ansi.RESET + ansi.SGR
+import "core:terminal/ansi"
 
 /*
 void_el_name = "area" | "base" | "col" | "embed" | "hr" | "img"
@@ -183,20 +175,24 @@ print_escaped :: proc(s: string) {
 	fmt.print("\"")
 }
 
-print_element :: proc(el: Element, depth := 0, formatting := ANSI_RESET) {
+print_element :: proc(
+	el: Element, depth := 0, display_attributes: ..string
+) {
 	print_tab(depth)
 
 	if el.name == "document" {
 		fmt.printfln("Document")
 	} else {
 		fmt.printf("%sElement:%s <%s> (%v)\n",
-			formatting, ANSI_RESET, el.name, el.type
+			sgr(..display_attributes), sgr(ansi.RESET), el.name, el.type
 		)
 	}
 
 	for attr in el.attributes {
 		print_tab(depth + 1)
-		fmt.printf("%sAttribute:%s %s = ", formatting, ANSI_RESET, attr.name)
+		fmt.printf("%sAttribute:%s %s = ",
+			sgr(..display_attributes), sgr(ansi.RESET), attr.name
+		)
 		print_escaped(attr.value)
 		fmt.print("\n")
 	}
@@ -206,18 +202,20 @@ print_element :: proc(el: Element, depth := 0, formatting := ANSI_RESET) {
 	}
 }
 
-print_node :: proc(node: Node, depth := 0, formatting := ANSI_RESET) {
+print_node :: proc(
+	node: Node, depth := 0, display_attributes: ..string
+) {
 	switch value in node {
 	case Element:
-		print_element(value, depth, formatting)
+		print_element(value, depth, sgr(..display_attributes))
 	case Text:
 		print_tab(depth)
-		fmt.printf("%sText:%s ", formatting, ANSI_RESET)
+		fmt.printf("%sText:%s ", sgr(..display_attributes), sgr(ansi.RESET))
 		print_escaped(value.source)
 		fmt.print("\n")
 	case Placeholder:
 		print_tab(depth)
-		fmt.printf("%sPlaceholder:%s ", formatting, ANSI_RESET)
+		fmt.printf("%sPlaceholder:%s ", sgr(..display_attributes), sgr(ansi.RESET))
 		print_escaped(value.expression)
 		fmt.print("\n")
 	}
@@ -235,7 +233,7 @@ parse_document :: proc(scan: ^Scanner) -> Element {
 		parse_children(scan, &document)
 		fmt.printfln("Left parse_children in parse_document. current pos: %d", scan.pos)
 	}
-	print_element(document, formatting = ANSI_INFO)
+	print_element(document, 0, sgr(ANSI_INFO))
 	return document
 }
 
@@ -244,7 +242,7 @@ parse_element :: proc(scan: ^Scanner, element: ^Element) {
 	if element.type == .Normal {
 		parse_children(scan, element)
 	}
-	print_element(element^, formatting = ANSI_OK)
+	print_element(element^, 0, sgr(ANSI_OK))
 }
 
 parse_children :: proc(scan: ^Scanner, parent: ^Element) {
@@ -259,9 +257,9 @@ parse_children :: proc(scan: ^Scanner, parent: ^Element) {
 
 		char_string := utf8.runes_to_string({char})
 		defer delete(char_string)
-		fmt.printf("\n%siteration: %d, pos: %d (", ANSI_MAGENTA, iteration, scan.pos)
+		fmt.printf("\n%siteration: %d, pos: %d (", sgr(ANSI_MSG), iteration, scan.pos)
 		print_escaped(char_string)
-		fmt.printf(")%s\n", ANSI_RESET)
+		fmt.printf(")%s\n", sgr(ansi.RESET))
 
 		switch {
 		case char == START_TAG_OPEN && subsequent_char == SOLIDUS:
@@ -301,7 +299,7 @@ parse_non_html_tag :: proc(scan: ^Scanner) -> Text {
 	else {
 		text.source = read_until_rune(scan, TAG_CLOSE, inclusive = true)
 	}
-	fmt.printfln("%sNon-html tag:%s %s", ANSI_OK, ANSI_RESET, text.source)
+	fmt.printfln("%sNon-html tag:%s %s", sgr(ANSI_OK), sgr(ansi.RESET), text.source)
 	return text
 }
 
@@ -317,7 +315,7 @@ parse_start_tag :: proc(scan: ^Scanner, el: ^Element) {
 		case TAG_CLOSE:
 			expect(scan, TAG_CLOSE)
 			fmt.printfln("%sStart tag:%s %v\n\ttype: %v\n\tattr:%v",
-				ANSI_OK, ANSI_RESET, el.name, el.type, el.attributes[:],
+				sgr(ANSI_OK), sgr(ansi.RESET), el.name, el.type, el.attributes[:],
 			)
 			return
 		case SOLIDUS:
@@ -325,7 +323,7 @@ parse_start_tag :: proc(scan: ^Scanner, el: ^Element) {
 			if el.type == .Void {
 				fmt.printfln(
 					"%sElement %s has a solidus before its closing. This marks foreign elements as self closing, but <%s> is a void element where, although permitted, has no effect and may cause bugs if directly preceded by an unquoted attribute value. %s\n:%s",
-					ANSI_WARN, el.name, el.name, ANSI_RESET, mark_source(scan, start)
+					sgr(ANSI_WARN), el.name, el.name, sgr(ansi.RESET), mark_source(scan, start)
 				)
 			}
 			else {
@@ -354,7 +352,7 @@ parse_end_tag :: proc(scan: ^Scanner, el: ^Element) {
 	}
 	read_while(scan, is_whitespace_ASCII)
 	expect(scan, TAG_CLOSE)
-	fmt.printfln("%sClosing tag:%s %s", ANSI_OK, ANSI_RESET, name)
+	fmt.printfln("%sClosing tag:%s %s", sgr(ANSI_OK), sgr(ansi.RESET), name)
 }
 
 parse_el_name :: proc(scan: ^Scanner) -> string {
@@ -363,7 +361,7 @@ parse_el_name :: proc(scan: ^Scanner) -> string {
 	expect(scan, is_lower_ASCII, "lowercase")
 	read_while(scan, is_el_name_char)
 	name := utf8string.slice(scan.source, start_pos, scan.pos)
-	fmt.printfln("%sElement name:%s %s", ANSI_OK, ANSI_RESET, name)
+	fmt.printfln("%sElement name:%s %s", sgr(ANSI_OK), sgr(ansi.RESET), name)
 	return name
 }
 
@@ -398,7 +396,7 @@ parse_attribute_name :: proc(scan: ^Scanner, attr: ^Attribute) {
 	}
 	attr.name = utf8string.slice(scan.source, start, scan.pos)
 	fmt.printfln("%sAttribute%s name: %s\nSlices:%v",
-		ANSI_OK, ANSI_RESET, attr.name, attr.name_slices[:]
+		sgr(ANSI_OK), sgr(ansi.RESET), attr.name, attr.name_slices[:]
 	)
 }
 
@@ -418,7 +416,7 @@ parse_attribute :: proc(scan: ^Scanner) -> Attribute {
 			parse_unqoted(scan, &attribute)
 		}
 	}
-	fmt.printfln("%sAttribute:%s %v", ANSI_OK, ANSI_RESET, attribute)
+	fmt.printfln("%sAttribute:%s %v", sgr(ANSI_OK), sgr(ansi.RESET), attribute)
 	return attribute
 }
 
@@ -461,7 +459,7 @@ parse_quoted :: proc(scan: ^Scanner, attr: ^Attribute) {
 	}
 	attr.value = utf8string.slice(scan.source, start, scan.pos)
 	expect(scan, delim_char)
-	fmt.printfln("%sQuoted attribute value: %s%s", ANSI_OK, attr.value, ANSI_RESET)
+	fmt.printfln("%sQuoted attribute value: %s%s", sgr(ANSI_OK), attr.value, sgr(ansi.RESET))
 }
 
 parse_unqoted :: proc(scan: ^Scanner, attr: ^Attribute) {
@@ -475,7 +473,7 @@ parse_unqoted :: proc(scan: ^Scanner, attr: ^Attribute) {
 	if !is_el_close_delim(peek(scan)) {
 		scan.pos += 1
 	}
-	fmt.printfln("%sUnqoted attribute value: %s%s", ANSI_OK, attr.value, ANSI_RESET)
+	fmt.printfln("%sUnqoted attribute value: %s%s", sgr(ANSI_OK), attr.value, sgr(ansi.RESET))
 }
 
 parse_placeholder :: proc(scan: ^Scanner) -> Placeholder {
@@ -501,7 +499,7 @@ parse_placeholder :: proc(scan: ^Scanner) -> Placeholder {
 	placeholder : Placeholder = {
 		expression = utf8string.slice(scan.source, start, scan.pos - 1)
 	}
-	print_node(placeholder, formatting = ANSI_OK)
+	print_node(placeholder, display_attributes = {ANSI_OK})
 	// fmt.printfln("%sPlaceholder expression:%s %s", ANSI_OK, ANSI_RESET, placeholder.expression)
 	return placeholder
 }
@@ -518,7 +516,7 @@ parse_text :: proc(scan: ^Scanner) -> Text {
 		scan.pos += 1
 	}
 	text: Text = {source = utf8string.slice(scan.source, start, scan.pos)}
-	print_node(text, formatting = ANSI_OK)
+	print_node(text, display_attributes = {ANSI_OK})
 	// fmt.printfln("%sParsed text:%s \"%s\"", ANSI_OK, ANSI_RESET, text.source)
 	return text
 }
